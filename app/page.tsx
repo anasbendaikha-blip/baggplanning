@@ -1,70 +1,114 @@
-export default function Home() {
+"use client";
+
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+
+export default function HomePage() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        // Vérifier si l'utilisateur est connecté
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+          // Pas connecté → rediriger vers login
+          router.push('/auth/login');
+          return;
+        }
+
+        // Connecté → récupérer le type d'utilisateur
+        const { data: userData } = await supabase
+          .from('users')
+          .select('user_type')
+          .eq('id', user.id)
+          .single();
+
+        if (userData?.user_type === 'titulaire') {
+          router.push('/titulaire');
+        } else {
+          router.push('/employe');
+        }
+
+      } catch (error) {
+        console.error('Auth check error:', error);
+        router.push('/auth/login');
+      }
+    };
+
+    checkAuth();
+  }, [router]);
+
+  const styles = `
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', -apple-system, sans-serif; }
+    .loading-page {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 50%, #1e3a5f 100%);
+      color: white;
+    }
+    .logo {
+      width: 80px;
+      height: 80px;
+      background: linear-gradient(135deg, #34d399, #059669);
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 40px;
+      margin-bottom: 24px;
+      box-shadow: 0 8px 32px rgba(16,185,129,0.4);
+      animation: pulse 2s infinite;
+    }
+    .title {
+      font-size: 28px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+    .subtitle {
+      color: #94a3b8;
+      font-size: 14px;
+      margin-bottom: 32px;
+    }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid rgba(255,255,255,0.1);
+      border-top-color: #34d399;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    .loading-text {
+      margin-top: 16px;
+      color: #94a3b8;
+      font-size: 14px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+    }
+  `;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      {/* Header */}
-      <header className="bg-gradient-to-r from-slate-800 to-slate-700 text-white p-6 shadow-lg">
-        <div className="max-w-4xl mx-auto flex items-center gap-4">
-          <div className="w-12 h-12 bg-gradient-to-br from-green-400 to-green-500 rounded-xl flex items-center justify-center text-2xl shadow-lg">
-            📅
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold">BaggPlanning</h1>
-            <p className="text-slate-300 text-sm">Gestion intelligente des plannings</p>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="max-w-4xl mx-auto p-8">
-        <div className="text-center mb-12">
-          <h2 className="text-3xl font-bold text-slate-800 mb-4">
-            Bienvenue sur BaggPlanning
-          </h2>
-          <p className="text-slate-600">
-            Sélectionnez votre espace pour continuer
-          </p>
-        </div>
-
-        {/* Cards */}
-        <div className="grid md:grid-cols-2 gap-6">
-          {/* Card Employé */}
-          <a href="/employe" className="block bg-white rounded-2xl p-8 shadow-md hover:shadow-xl transition-all hover:-translate-y-1 border border-slate-200">
-            <div className="w-16 h-16 bg-gradient-to-br from-orange-400 to-orange-500 rounded-2xl flex items-center justify-center text-3xl mb-6 shadow-md">
-              👤
-            </div>
-            <h3 className="text-xl font-bold text-slate-800 mb-2">
-              Espace Employé
-            </h3>
-            <p className="text-slate-600 mb-4">
-              Saisissez vos disponibilités et gérez vos demandes de congés
-            </p>
-            <span className="text-orange-500 font-semibold flex items-center gap-2">
-              Accéder →
-            </span>
-          </a>
-
-          {/* Card Titulaire */}
-          <a href="/titulaire" className="block bg-white rounded-2xl p-8 shadow-md hover:shadow-xl transition-all hover:-translate-y-1 border border-slate-200">
-            <div className="w-16 h-16 bg-gradient-to-br from-green-400 to-green-500 rounded-2xl flex items-center justify-center text-3xl mb-6 shadow-md">
-              👩‍💼
-            </div>
-            <h3 className="text-xl font-bold text-slate-800 mb-2">
-              Espace Titulaire
-            </h3>
-            <p className="text-slate-600 mb-4">
-              Gérez les plannings, les demandes et visualisez les disponibilités
-            </p>
-            <span className="text-green-500 font-semibold flex items-center gap-2">
-              Accéder →
-            </span>
-          </a>
-        </div>
-      </main>
-
-      {/* Footer */}
-      <footer className="text-center py-8 text-slate-500 text-sm">
-        BaggPlanning © 2025 - Développé par Anas
-      </footer>
+    <div>
+      <style dangerouslySetInnerHTML={{ __html: styles }} />
+      <div className="loading-page">
+        <div className="logo">📅</div>
+        <h1 className="title">BaggPlanning</h1>
+        <p className="subtitle">Gestion des plannings de la pharmacie</p>
+        <div className="spinner"></div>
+        <p className="loading-text">Chargement...</p>
+      </div>
     </div>
   );
 }

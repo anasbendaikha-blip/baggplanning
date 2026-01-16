@@ -1,679 +1,686 @@
 "use client";
-import { useState, useEffect } from "react";
+
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+import { Employee, Disponibilite, Planning, Demande } from '@/types/database';
 
 export default function EmployePage() {
-  // === ÉTATS ===
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [employee, setEmployee] = useState<Employee | null>(null);
   const [onglet, setOnglet] = useState("dispos");
   const [toast, setToast] = useState({ visible: false, message: "", type: "success" });
-  const [showUserDropdown, setShowUserDropdown] = useState(false);
-  const [currentUser, setCurrentUser] = useState({ initiales: "AN", nom: "Anas" });
-
-  const users = [
-    { initiales: "AN", nom: "Anas" },
-    { initiales: "CE", nom: "Celya" },
-    { initiales: "NI", nom: "Nicolas" },
-    { initiales: "MA", nom: "Maissa" },
-    { initiales: "RO", nom: "Robin" },
-  ];
-
-  const jours = [
-    { id: "lundi", nom: "Lundi", date: "20 janvier", shortDate: "20" },
-    { id: "mardi", nom: "Mardi", date: "21 janvier", shortDate: "21" },
-    { id: "mercredi", nom: "Mercredi", date: "22 janvier", shortDate: "22" },
-    { id: "jeudi", nom: "Jeudi", date: "23 janvier", shortDate: "23" },
-    { id: "vendredi", nom: "Vendredi", date: "24 janvier", shortDate: "24" },
-    { id: "samedi", nom: "Samedi", date: "25 janvier", shortDate: "25" },
-  ];
-
-  const heuresDebut = ["08:30", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
-  const heuresFin = ["12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "19:30", "20:30"];
-
-  const [disponibilites, setDisponibilites] = useState(() => {
-    const init: Record<string, { disponible: boolean; debut: string; fin: string }> = {};
-    jours.forEach((j) => {
-      init[j.id] = { disponible: false, debut: "17:00", fin: "20:30" };
-    });
-    return init;
+  
+  // Disponibilités
+  const [disponibilite, setDisponibilite] = useState<Disponibilite | null>(null);
+  const [dispoForm, setDispoForm] = useState<Record<string, { disponible: boolean; debut: string; fin: string }>>({
+    lundi: { disponible: false, debut: "08:30", fin: "20:30" },
+    mardi: { disponible: false, debut: "08:30", fin: "20:30" },
+    mercredi: { disponible: false, debut: "08:30", fin: "20:30" },
+    jeudi: { disponible: false, debut: "08:30", fin: "20:30" },
+    vendredi: { disponible: false, debut: "08:30", fin: "20:30" },
+    samedi: { disponible: false, debut: "08:30", fin: "19:30" },
+  });
+  
+  // Planning
+  const [planning, setPlanning] = useState<Planning[]>([]);
+  
+  // Demandes
+  const [demandes, setDemandes] = useState<Demande[]>([]);
+  const [demandeForm, setDemandeForm] = useState({
+    type: 'conge' as const,
+    date_debut: '',
+    date_fin: '',
+    creneau: 'journee' as const,
+    motif: '',
+    urgent: false,
   });
 
-  const [formDemande, setFormDemande] = useState({
-    type: "conge",
-    dateDebut: "2025-01-24",
-    dateFin: "2025-01-24",
-    creneau: "journee",
-    motif: "",
-  });
+  const [savingDispo, setSavingDispo] = useState(false);
+  const [sendingDemande, setSendingDemande] = useState(false);
 
-  // === FONCTIONS ===
+  // Calculer le lundi de la semaine courante
+  const getMondayOfWeek = () => {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    d.setDate(diff);
+    return d.toISOString().split('T')[0];
+  };
+
+  const [semaineDebut, setSemaineDebut] = useState(getMondayOfWeek());
+
+  // Charger les données au démarrage
+  useEffect(() => {
+    const loadData = async () => {
+      // Vérifier l'authentification
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        router.push('/auth/login');
+        return;
+      }
+
+      // Récupérer les infos de l'utilisateur
+      const { data: userData } = await supabase
+        .from('users')
+        .select('*, employees(*)')
+        .eq('id', user.id)
+        .single();
+
+      if (!userData || userData.user_type !== 'employe') {
+        router.push('/auth/login');
+        return;
+      }
+
+      setEmployee(userData.employees);
+      
+      // Charger les données
+      await Promise.all([
+        loadDisponibilite(userData.employee_id),
+        loadPlanning(userData.employee_id),
+        loadDemandes(userData.employee_id),
+      ]);
+
+      setLoading(false);
+    };
+
+    loadData();
+  }, [router, semaineDebut]);
+
+  const loadDisponibilite = async (employeeId: number) => {
+    const { data } = await supabase
+      .from('disponibilites')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .eq('semaine_debut', semaineDebut)
+      .single();
+
+    if (data) {
+      setDisponibilite(data);
+      // Remplir le formulaire
+      const jours = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+      const newForm: typeof dispoForm = {};
+      jours.forEach(jour => {
+        newForm[jour] = {
+          disponible: data[`${jour}_disponible`] || false,
+          debut: data[`${jour}_debut`] || "08:30",
+          fin: data[`${jour}_fin`] || (jour === 'samedi' ? "19:30" : "20:30"),
+        };
+      });
+      setDispoForm(newForm);
+    }
+  };
+
+  const loadPlanning = async (employeeId: number) => {
+    const dateFin = new Date(semaineDebut);
+    dateFin.setDate(dateFin.getDate() + 5);
+    
+    const { data } = await supabase
+      .from('planning')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .gte('date', semaineDebut)
+      .lte('date', dateFin.toISOString().split('T')[0])
+      .order('date');
+
+    setPlanning(data || []);
+  };
+
+  const loadDemandes = async (employeeId: number) => {
+    const { data } = await supabase
+      .from('demandes')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    setDemandes(data || []);
+  };
+
   const showToast = (message: string, type: "success" | "error" = "success") => {
     setToast({ visible: true, message, type });
     setTimeout(() => setToast({ visible: false, message: "", type: "success" }), 3500);
   };
 
-  const formatHeure = (h: string) => h.replace(":", "h");
-
-  const calculerHeures = () => {
-    let total = 0;
-    Object.values(disponibilites).forEach((d) => {
-      if (d.disponible) {
-        const [hD, mD] = d.debut.split(":").map(Number);
-        const [hF, mF] = d.fin.split(":").map(Number);
-        total += hF + mF / 60 - (hD + mD / 60);
-      }
-    });
-    return total.toFixed(1);
-  };
-
-  const toggleDispo = (jourId: string, value: boolean) => {
-    setDisponibilites((prev) => ({
-      ...prev,
-      [jourId]: { ...prev[jourId], disponible: value },
-    }));
-  };
-
-  const updateHeure = (jourId: string, type: "debut" | "fin", value: string) => {
-    setDisponibilites((prev) => ({
-      ...prev,
-      [jourId]: { ...prev[jourId], [type]: value },
-    }));
-  };
-
-  const quickSelect = (jourId: string, slot: string) => {
-    const slots: Record<string, { debut: string; fin: string }> = {
-      matin: { debut: "08:30", fin: "14:00" },
-      aprem: { debut: "14:00", fin: "20:30" },
-      soir: { debut: "17:00", fin: "20:30" },
-      journee: { debut: "08:30", fin: "20:30" },
+  const saveDisponibilites = async () => {
+    if (!employee) return;
+    
+    setSavingDispo(true);
+    
+    const data: any = {
+      employee_id: employee.id,
+      semaine_debut: semaineDebut,
     };
-    if (slots[slot]) {
-      setDisponibilites((prev) => ({
-        ...prev,
-        [jourId]: { disponible: true, ...slots[slot] },
-      }));
+
+    const jours = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+    jours.forEach(jour => {
+      data[`${jour}_disponible`] = dispoForm[jour].disponible;
+      data[`${jour}_debut`] = dispoForm[jour].disponible ? dispoForm[jour].debut : null;
+      data[`${jour}_fin`] = dispoForm[jour].disponible ? dispoForm[jour].fin : null;
+    });
+
+    const { error } = await supabase
+      .from('disponibilites')
+      .upsert([data], { onConflict: 'employee_id,semaine_debut' });
+
+    setSavingDispo(false);
+
+    if (error) {
+      showToast("Erreur: " + error.message, "error");
+    } else {
+      showToast("Disponibilités enregistrées !");
+      loadDisponibilite(employee.id);
     }
   };
 
-  const setAllAvailable = (value: boolean) => {
-    setDisponibilites((prev) => {
-      const newState = { ...prev };
-      Object.keys(newState).forEach((key) => {
-        newState[key] = { ...newState[key], disponible: value };
-      });
-      return newState;
-    });
-  };
-
-  const saveDisponibilites = () => {
-    showToast("Disponibilités enregistrées avec succès !");
-  };
-
-  const sendDemande = () => {
-    if (!formDemande.motif.trim()) {
-      showToast("Veuillez indiquer un motif", "error");
+  const sendDemande = async () => {
+    if (!employee) return;
+    if (!demandeForm.date_debut || !demandeForm.date_fin) {
+      showToast("Veuillez remplir les dates", "error");
       return;
     }
-    showToast("Demande envoyée avec succès !");
-    setFormDemande({ ...formDemande, motif: "" });
+
+    setSendingDemande(true);
+
+    const { error } = await supabase
+      .from('demandes')
+      .insert([{
+        employee_id: employee.id,
+        type: demandeForm.type,
+        date_debut: demandeForm.date_debut,
+        date_fin: demandeForm.date_fin,
+        creneau: demandeForm.creneau,
+        motif: demandeForm.motif,
+        urgent: demandeForm.urgent,
+        status: 'en_attente',
+      }]);
+
+    setSendingDemande(false);
+
+    if (error) {
+      showToast("Erreur: " + error.message, "error");
+    } else {
+      showToast("Demande envoyée !");
+      setDemandeForm({
+        type: 'conge',
+        date_debut: '',
+        date_fin: '',
+        creneau: 'journee',
+        motif: '',
+        urgent: false,
+      });
+      loadDemandes(employee.id);
+    }
   };
 
-  const selectUser = (user: { initiales: string; nom: string }) => {
-    setCurrentUser(user);
-    setShowUserDropdown(false);
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/auth/login');
   };
+
+  const toggleDispo = (jour: string) => {
+    setDispoForm(prev => ({
+      ...prev,
+      [jour]: { ...prev[jour], disponible: !prev[jour].disponible }
+    }));
+  };
+
+  const updateHeure = (jour: string, field: 'debut' | 'fin', value: string) => {
+    setDispoForm(prev => ({
+      ...prev,
+      [jour]: { ...prev[jour], [field]: value }
+    }));
+  };
+
+  const setAllAvailable = () => {
+    const newForm: typeof dispoForm = {};
+    Object.keys(dispoForm).forEach(jour => {
+      newForm[jour] = { ...dispoForm[jour], disponible: true };
+    });
+    setDispoForm(newForm);
+  };
+
+  const clearAll = () => {
+    const newForm: typeof dispoForm = {};
+    Object.keys(dispoForm).forEach(jour => {
+      newForm[jour] = { ...dispoForm[jour], disponible: false };
+    });
+    setDispoForm(newForm);
+  };
+
+  const heures = ["08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30", "20:00", "20:30"];
+
+  const joursLabels = [
+    { key: 'lundi', label: 'Lundi', short: 'Lun' },
+    { key: 'mardi', label: 'Mardi', short: 'Mar' },
+    { key: 'mercredi', label: 'Mercredi', short: 'Mer' },
+    { key: 'jeudi', label: 'Jeudi', short: 'Jeu' },
+    { key: 'vendredi', label: 'Vendredi', short: 'Ven' },
+    { key: 'samedi', label: 'Samedi', short: 'Sam' },
+  ];
+
+  const getDateForDay = (index: number) => {
+    const d = new Date(semaineDebut);
+    d.setDate(d.getDate() + index);
+    return d.getDate();
+  };
+
+  const calculerTotalHeures = () => {
+    let total = 0;
+    Object.values(dispoForm).forEach(jour => {
+      if (jour.disponible && jour.debut && jour.fin) {
+        const [hd, md] = jour.debut.split(':').map(Number);
+        const [hf, mf] = jour.fin.split(':').map(Number);
+        total += (hf * 60 + mf) - (hd * 60 + md);
+      }
+    });
+    const h = Math.floor(total / 60);
+    const m = total % 60;
+    return m > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${h}h`;
+  };
+
+  const formatHeure = (h: string) => h?.replace(':', 'h') || '';
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'approuve': return { bg: '#d1fae5', color: '#047857', text: '✓ Approuvé' };
+      case 'refuse': return { bg: '#fee2e2', color: '#b91c1c', text: '✗ Refusé' };
+      default: return { bg: '#fef3c7', color: '#b45309', text: '⏳ En attente' };
+    }
+  };
+
+  const styles = `
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', -apple-system, sans-serif; background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); min-height: 100vh; }
+    .header { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.95); backdrop-filter: blur(20px); box-shadow: 0 2px 20px rgba(0,0,0,0.08); }
+    .header-content { max-width: 800px; margin: 0 auto; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; }
+    .logo-section { display: flex; align-items: center; gap: 12px; }
+    .logo { width: 44px; height: 44px; background: linear-gradient(135deg, #3b82f6, #1d4ed8); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; color: white; box-shadow: 0 4px 12px rgba(59,130,246,0.3); }
+    .logo-text h1 { font-size: 18px; font-weight: 700; color: #1e293b; }
+    .logo-text p { font-size: 12px; color: #64748b; }
+    .user-section { display: flex; align-items: center; gap: 12px; }
+    .user-badge { display: flex; align-items: center; gap: 8px; background: linear-gradient(135deg, #f1f5f9, #e2e8f0); padding: 8px 14px; border-radius: 12px; }
+    .user-avatar { width: 32px; height: 32px; background: linear-gradient(135deg, #fb923c, #ea580c); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 700; }
+    .user-name { font-weight: 600; color: #334155; font-size: 14px; }
+    .logout-btn { padding: 8px 12px; background: none; border: 1px solid #e2e8f0; border-radius: 8px; color: #64748b; font-size: 13px; cursor: pointer; }
+    .logout-btn:hover { background: #f1f5f9; }
+    .nav { position: sticky; top: 68px; z-index: 90; background: white; border-bottom: 1px solid #e2e8f0; }
+    .nav-content { max-width: 800px; margin: 0 auto; padding: 8px 20px; display: flex; gap: 6px; }
+    .tab { flex: 1; padding: 12px; border: none; background: none; border-radius: 10px; font-size: 13px; font-weight: 600; color: #64748b; cursor: pointer; font-family: inherit; display: flex; flex-direction: column; align-items: center; gap: 4px; transition: all 0.2s; }
+    .tab:hover { background: #f1f5f9; }
+    .tab.active { background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; box-shadow: 0 4px 12px rgba(59,130,246,0.3); }
+    .tab-icon { font-size: 18px; }
+    .main { max-width: 800px; margin: 0 auto; padding: 20px; }
+    .view { display: none; }
+    .view.active { display: block; }
+    .card { background: white; border-radius: 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.04); overflow: hidden; margin-bottom: 20px; }
+    .card-header { padding: 20px; background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; }
+    .card-header-purple { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
+    .card-header-green { background: linear-gradient(135deg, #10b981, #059669); }
+    .card-title { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+    .card-subtitle { font-size: 13px; opacity: 0.9; margin-top: 4px; }
+    .card-body { padding: 20px; }
+    .quick-actions { display: flex; gap: 10px; margin-bottom: 20px; }
+    .quick-btn { flex: 1; padding: 12px; border: 2px solid #e2e8f0; border-radius: 12px; background: white; font-size: 13px; font-weight: 600; color: #475569; cursor: pointer; font-family: inherit; transition: all 0.2s; }
+    .quick-btn:hover { border-color: #3b82f6; color: #3b82f6; }
+    .day-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .day-card { border: 2px solid #e2e8f0; border-radius: 16px; padding: 16px; transition: all 0.2s; }
+    .day-card.available { border-color: #10b981; background: linear-gradient(135deg, #ecfdf5, #d1fae5); }
+    .day-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .day-name { font-weight: 700; color: #1e293b; }
+    .day-date { font-size: 12px; color: #64748b; }
+    .toggle-btn { width: 52px; height: 28px; border-radius: 14px; border: none; cursor: pointer; position: relative; transition: all 0.2s; }
+    .toggle-btn.off { background: #e2e8f0; }
+    .toggle-btn.on { background: #10b981; }
+    .toggle-btn::after { content: ''; position: absolute; top: 2px; width: 24px; height: 24px; border-radius: 50%; background: white; transition: all 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .toggle-btn.off::after { left: 2px; }
+    .toggle-btn.on::after { left: 26px; }
+    .time-selectors { display: flex; gap: 8px; align-items: center; }
+    .time-select { flex: 1; padding: 10px; border: 2px solid #e2e8f0; border-radius: 10px; font-size: 14px; font-family: inherit; background: white; cursor: pointer; }
+    .time-select:focus { outline: none; border-color: #3b82f6; }
+    .time-arrow { color: #94a3b8; font-size: 14px; }
+    .btn { padding: 14px 24px; border: none; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s; width: 100%; }
+    .btn-primary { background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(59,130,246,0.3); }
+    .btn-primary:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
+    .btn-success { background: linear-gradient(135deg, #10b981, #059669); color: white; }
+    .btn-success:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(16,185,129,0.3); }
+    .form-group { margin-bottom: 20px; }
+    .form-label { display: block; font-weight: 600; color: #334155; font-size: 14px; margin-bottom: 8px; }
+    .form-input { width: 100%; padding: 14px 16px; background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 15px; font-family: inherit; }
+    .form-input:focus { outline: none; border-color: #3b82f6; background: white; }
+    .form-textarea { min-height: 100px; resize: vertical; }
+    .type-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .type-option { padding: 16px; border: 2px solid #e2e8f0; border-radius: 12px; text-align: center; cursor: pointer; transition: all 0.2s; }
+    .type-option:hover { border-color: #cbd5e1; }
+    .type-option.selected { border-color: #3b82f6; background: #eff6ff; }
+    .type-icon { font-size: 24px; margin-bottom: 4px; }
+    .type-label { font-weight: 600; font-size: 13px; color: #334155; }
+    .creneau-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .creneau-option { padding: 12px; border: 2px solid #e2e8f0; border-radius: 10px; text-align: center; cursor: pointer; font-size: 13px; font-weight: 600; color: #475569; }
+    .creneau-option:hover { border-color: #cbd5e1; }
+    .creneau-option.selected { border-color: #3b82f6; background: #eff6ff; color: #1d4ed8; }
+    .planning-day { background: #f8fafc; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    .planning-day-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .planning-day-name { font-weight: 700; color: #1e293b; }
+    .planning-badge { padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+    .planning-badge.working { background: #d1fae5; color: #047857; }
+    .planning-badge.off { background: #f1f5f9; color: #64748b; }
+    .planning-hours { font-size: 14px; color: #475569; }
+    .demande-card { background: #f8fafc; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    .demande-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .demande-type { font-weight: 600; color: #1e293b; }
+    .demande-status { padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+    .demande-details { font-size: 13px; color: #64748b; }
+    .total-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 8px; font-size: 13px; margin-top: 8px; }
+    .toast { position: fixed; bottom: 24px; right: 24px; padding: 16px 24px; border-radius: 16px; display: flex; align-items: center; gap: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); z-index: 1000; opacity: 0; transform: translateY(20px); transition: all 0.3s; font-weight: 600; color: white; }
+    .toast.success { background: linear-gradient(135deg, #10b981, #059669); }
+    .toast.error { background: linear-gradient(135deg, #ef4444, #dc2626); }
+    .toast.active { opacity: 1; transform: translateY(0); }
+    .loading { display: flex; align-items: center; justify-content: center; min-height: 100vh; font-size: 18px; color: #64748b; }
+    .empty-state { text-align: center; padding: 40px 20px; color: #64748b; }
+    .checkbox-label { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+    .checkbox-label input { width: 20px; height: 20px; cursor: pointer; }
+    @media (max-width: 600px) { .day-grid { grid-template-columns: 1fr; } .type-grid { grid-template-columns: 1fr; } }
+  `;
+
+  if (loading) {
+    return (
+      <div>
+        <style dangerouslySetInnerHTML={{ __html: styles }} />
+        <div className="loading">⏳ Chargement...</div>
+      </div>
+    );
+  }
 
   return (
-    <>
-      <style jsx global>{`
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Inter', -apple-system, sans-serif; background: linear-gradient(135deg, #f8fafc 0%, #e0f2fe 50%, #f1f5f9 100%); min-height: 100vh; }
-        
-        .header { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.85); backdrop-filter: blur(20px); border-bottom: 1px solid rgba(226,232,240,0.5); }
-        .header-content { max-width: 500px; margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; }
-        .logo-section { display: flex; align-items: center; gap: 12px; text-decoration: none; }
-        .logo { width: 40px; height: 40px; background: linear-gradient(135deg, #34d399, #059669); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; box-shadow: 0 4px 12px rgba(16,185,129,0.3); }
-        .logo-text h1 { font-size: 16px; font-weight: 700; color: #1e293b; }
-        .logo-text p { font-size: 11px; color: #64748b; }
-        
-        .user-selector { position: relative; }
-        .user-btn { display: flex; align-items: center; gap: 8px; background: linear-gradient(135deg, #f1f5f9, #e2e8f0); padding: 8px 12px; border-radius: 12px; border: none; cursor: pointer; }
-        .user-avatar { width: 32px; height: 32px; background: linear-gradient(135deg, #fb923c, #ea580c); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: 700; }
-        .user-info { text-align: left; }
-        .user-name { font-size: 13px; font-weight: 600; color: #1e293b; }
-        .user-role { font-size: 11px; color: #64748b; }
-        .user-dropdown { display: none; position: absolute; right: 0; top: 100%; margin-top: 8px; width: 180px; background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.15); overflow: hidden; z-index: 200; }
-        .user-dropdown.active { display: block; }
-        .user-option { width: 100%; padding: 12px 16px; display: flex; align-items: center; gap: 12px; border: none; background: none; cursor: pointer; font-family: inherit; }
-        .user-option:hover { background: #f8fafc; }
-        .user-option.selected { background: #ecfdf5; }
-        .user-option .avatar { width: 32px; height: 32px; background: linear-gradient(135deg, #fb923c, #ea580c); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: 700; }
-        .user-option span { font-weight: 500; color: #334155; }
-        
-        .nav { position: sticky; top: 64px; z-index: 90; background: rgba(255,255,255,0.85); backdrop-filter: blur(20px); border-bottom: 1px solid rgba(226,232,240,0.5); }
-        .nav-content { max-width: 500px; margin: 0 auto; padding: 8px 16px; }
-        .tabs { display: flex; gap: 4px; background: #f1f5f9; padding: 4px; border-radius: 12px; }
-        .tab { flex: 1; padding: 10px 8px; border: none; background: none; border-radius: 8px; font-size: 13px; font-weight: 600; color: #64748b; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 4px; transition: all 0.2s; }
-        .tab:hover { color: #334155; }
-        .tab.active { background: white; color: #1e293b; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        
-        .main { max-width: 500px; margin: 0 auto; padding: 20px 16px 100px; }
-        .view { display: none; }
-        .view.active { display: block; }
-        
-        .week-header { background: linear-gradient(135deg, #3b82f6, #6366f1); border-radius: 20px; padding: 20px; color: white; margin-bottom: 16px; box-shadow: 0 8px 24px rgba(59,130,246,0.3); }
-        .week-header-top { display: flex; justify-content: space-between; margin-bottom: 12px; }
-        .week-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; opacity: 0.8; }
-        .week-dates { font-size: 20px; font-weight: 800; }
-        .week-hours { font-size: 24px; font-weight: 800; text-align: right; }
-        .week-hours-label { font-size: 11px; opacity: 0.8; text-align: right; }
-        .deadline-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.2); padding: 8px 14px; border-radius: 10px; font-size: 13px; }
-        
-        .quick-actions { display: flex; gap: 8px; margin-bottom: 16px; }
-        .quick-action-btn { flex: 1; padding: 10px 16px; border: none; border-radius: 12px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.2s; }
-        .quick-action-btn.primary { background: #ecfdf5; color: #059669; }
-        .quick-action-btn.primary:hover { background: #d1fae5; }
-        .quick-action-btn.secondary { background: #f1f5f9; color: #64748b; }
-        .quick-action-btn.secondary:hover { background: #e2e8f0; }
-        
-        .day-card { background: white; border-radius: 20px; overflow: hidden; margin-bottom: 12px; border: 2px solid transparent; transition: all 0.2s; }
-        .day-card.available { border-color: #6ee7b7; box-shadow: 0 4px 12px rgba(16,185,129,0.15); }
-        .day-header { padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
-        .day-card.available .day-header { background: #ecfdf5; border-bottom-color: #a7f3d0; }
-        .day-header-left { display: flex; align-items: center; gap: 12px; }
-        .day-number { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; background: #e2e8f0; color: #64748b; }
-        .day-card.available .day-number { background: #10b981; color: white; }
-        .day-name { font-weight: 600; color: #1e293b; }
-        .day-date { font-size: 12px; color: #64748b; }
-        .day-hours { font-size: 13px; font-weight: 600; color: #10b981; }
-        .day-content { padding: 16px; }
-        
-        .toggle-btns { display: flex; gap: 8px; margin-bottom: 12px; }
-        .toggle-btn { flex: 1; padding: 12px 16px; border: none; border-radius: 12px; font-size: 13px; font-weight: 600; cursor: pointer; background: #f1f5f9; color: #64748b; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s; }
-        .toggle-btn:hover { background: #e2e8f0; }
-        .toggle-btn.available { background: #10b981; color: white; box-shadow: 0 4px 12px rgba(16,185,129,0.3); }
-        .toggle-btn.unavailable { background: #ef4444; color: white; box-shadow: 0 4px 12px rgba(239,68,68,0.3); }
-        
-        .time-selector { display: none; gap: 12px; align-items: center; margin-bottom: 12px; animation: slideDown 0.2s ease; }
-        .time-selector.visible { display: flex; }
-        @keyframes slideDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
-        .time-input { flex: 1; }
-        .time-input label { display: block; font-size: 11px; font-weight: 600; color: #64748b; margin-bottom: 6px; }
-        .time-input select { width: 100%; padding: 12px; background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 14px; font-family: inherit; color: #1e293b; cursor: pointer; }
-        .time-input select:focus { outline: none; border-color: #10b981; }
-        .time-arrow { color: #cbd5e1; margin-top: 20px; }
-        
-        .quick-select { display: none; flex-wrap: wrap; gap: 8px; }
-        .quick-select.visible { display: flex; }
-        .quick-btn { padding: 8px 14px; background: #f1f5f9; border: none; border-radius: 10px; font-size: 12px; font-weight: 500; color: #64748b; cursor: pointer; font-family: inherit; transition: all 0.2s; }
-        .quick-btn:hover { background: #ecfdf5; color: #059669; }
-        
-        .submit-btn { width: 100%; padding: 18px; background: linear-gradient(135deg, #10b981, #059669); border: none; border-radius: 16px; color: white; font-size: 15px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 16px rgba(16,185,129,0.3); margin-top: 16px; font-family: inherit; transition: all 0.2s; }
-        .submit-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(16,185,129,0.4); }
-        .submit-btn.blue { background: linear-gradient(135deg, #3b82f6, #2563eb); box-shadow: 0 4px 16px rgba(59,130,246,0.3); }
-        .submit-btn.blue:hover { box-shadow: 0 8px 24px rgba(59,130,246,0.4); }
-        
-        .card { background: white; border-radius: 20px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
-        .card-title { font-size: 18px; font-weight: 700; color: #1e293b; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
-        .form-group { margin-bottom: 20px; }
-        .form-label { display: block; font-weight: 600; color: #334155; font-size: 14px; margin-bottom: 10px; }
-        
-        .type-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-        .type-option { padding: 16px; border: 2px solid #e2e8f0; border-radius: 14px; text-align: center; cursor: pointer; background: white; transition: all 0.2s; }
-        .type-option:hover { border-color: #cbd5e1; }
-        .type-option.selected { border-color: #10b981; background: #ecfdf5; }
-        .type-option .icon { font-size: 28px; margin-bottom: 6px; }
-        .type-option .label { font-weight: 600; color: #1e293b; font-size: 13px; }
-        
-        .date-row { display: flex; gap: 12px; align-items: center; }
-        .date-input { flex: 1; }
-        .date-input label { display: block; font-size: 11px; color: #64748b; margin-bottom: 6px; }
-        .date-input input { width: 100%; padding: 12px; background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 14px; font-family: inherit; }
-        .date-input input:focus { outline: none; border-color: #10b981; }
-        .date-arrow { color: #cbd5e1; margin-top: 18px; }
-        
-        .creneau-btns { display: flex; gap: 8px; }
-        .creneau-btn { flex: 1; padding: 12px; border: 2px solid #e2e8f0; border-radius: 12px; background: white; font-size: 12px; font-weight: 600; color: #64748b; cursor: pointer; font-family: inherit; transition: all 0.2s; }
-        .creneau-btn:hover { border-color: #cbd5e1; }
-        .creneau-btn.selected { border-color: #10b981; background: #ecfdf5; color: #059669; }
-        
-        .form-textarea { width: 100%; padding: 14px; background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 14px; font-size: 14px; font-family: inherit; min-height: 100px; resize: none; }
-        .form-textarea:focus { outline: none; border-color: #10b981; }
-        
-        .info-box { background: #eff6ff; border-radius: 14px; padding: 16px; display: flex; gap: 12px; margin-bottom: 20px; }
-        .info-box .icon { font-size: 20px; }
-        .info-box .title { font-weight: 600; color: #1e40af; font-size: 14px; margin-bottom: 4px; }
-        .info-box .text { color: #3b82f6; font-size: 12px; }
-        
-        .planning-header { background: linear-gradient(135deg, #6366f1, #8b5cf6); border-radius: 20px; padding: 20px; color: white; margin-bottom: 16px; box-shadow: 0 8px 24px rgba(99,102,241,0.3); }
-        .planning-header .label { font-size: 11px; font-weight: 600; text-transform: uppercase; opacity: 0.8; }
-        .planning-header .dates { font-size: 20px; font-weight: 800; }
-        
-        .planning-day { display: flex; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid #f1f5f9; }
-        .planning-day:last-child { border-bottom: none; }
-        .planning-day-left { display: flex; align-items: center; gap: 12px; }
-        .planning-day-number { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 700; }
-        .planning-day-number.working { background: #ecfdf5; color: #059669; }
-        .planning-day-number.off { background: #f1f5f9; color: #94a3b8; }
-        .planning-day-name { font-weight: 600; color: #1e293b; }
-        .planning-day-date { font-size: 12px; color: #64748b; }
-        .planning-badge { padding: 10px 16px; border-radius: 12px; font-size: 13px; font-weight: 600; }
-        .planning-badge.working { background: linear-gradient(135deg, #10b981, #059669); color: white; box-shadow: 0 2px 8px rgba(16,185,129,0.3); }
-        .planning-badge.off { background: #f1f5f9; color: #94a3b8; }
-        
-        .planning-total { background: linear-gradient(135deg, #ecfdf5, #d1fae5); border: 1px solid #a7f3d0; border-radius: 16px; padding: 20px; margin-top: 16px; display: flex; justify-content: space-between; align-items: center; }
-        .planning-total-label { font-weight: 600; color: #059669; }
-        .planning-total-value { font-size: 28px; font-weight: 800; color: #047857; }
-        .planning-total-icon { width: 56px; height: 56px; background: #a7f3d0; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; }
-        
-        .history-item { background: white; border-radius: 16px; padding: 16px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
-        .history-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
-        .history-left { display: flex; align-items: center; gap: 12px; }
-        .history-icon { width: 40px; height: 40px; background: #f1f5f9; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
-        .history-type { font-weight: 600; color: #1e293b; }
-        .history-date { font-size: 12px; color: #64748b; }
-        .status-badge { padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 700; }
-        .status-badge.approved { background: #d1fae5; color: #047857; }
-        .status-badge.rejected { background: #fee2e2; color: #b91c1c; }
-        .history-details { font-size: 13px; color: #475569; line-height: 1.6; }
-        .history-note { margin-top: 8px; font-size: 12px; }
-        .history-note.success { color: #059669; }
-        .history-note.error { color: #dc2626; }
-        
-        .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(100px); padding: 16px 24px; border-radius: 16px; display: flex; align-items: center; gap: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); z-index: 1000; opacity: 0; transition: all 0.3s; font-weight: 600; }
-        .toast.success { background: linear-gradient(135deg, #10b981, #059669); color: white; }
-        .toast.error { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
-        .toast.active { transform: translateX(-50%) translateY(0); opacity: 1; }
-        
-        .back-link { display: block; text-align: center; margin-top: 24px; color: #64748b; text-decoration: none; }
-        .back-link:hover { color: #334155; }
-        
-        @media (max-width: 480px) { .user-info { display: none; } }
-      `}</style>
+    <div>
+      <style dangerouslySetInnerHTML={{ __html: styles }} />
 
       {/* Header */}
       <header className="header">
         <div className="header-content">
-          <a href="/" className="logo-section">
+          <div className="logo-section">
             <div className="logo">📅</div>
             <div className="logo-text">
               <h1>BaggPlanning</h1>
               <p>Espace Employé</p>
             </div>
-          </a>
-
-          <div className="user-selector">
-            <button className="user-btn" onClick={() => setShowUserDropdown(!showUserDropdown)}>
-              <div className="user-avatar">{currentUser.initiales}</div>
-              <div className="user-info">
-                <div className="user-name">{currentUser.nom}</div>
-                <div className="user-role">Étudiant</div>
-              </div>
-              <span>▼</span>
-            </button>
-
-            <div className={`user-dropdown ${showUserDropdown ? "active" : ""}`}>
-              {users.map((user) => (
-                <button
-                  key={user.initiales}
-                  className={`user-option ${currentUser.initiales === user.initiales ? "selected" : ""}`}
-                  onClick={() => selectUser(user)}
-                >
-                  <div className="avatar">{user.initiales}</div>
-                  <span>{user.nom}</span>
-                </button>
-              ))}
+          </div>
+          <div className="user-section">
+            <div className="user-badge">
+              <div className="user-avatar">{employee?.prenom?.substring(0, 2).toUpperCase()}</div>
+              <span className="user-name">{employee?.prenom}</span>
             </div>
+            <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
           </div>
         </div>
       </header>
 
-      {/* Navigation */}
+      {/* Nav */}
       <nav className="nav">
         <div className="nav-content">
-          <div className="tabs">
-            <button className={`tab ${onglet === "dispos" ? "active" : ""}`} onClick={() => setOnglet("dispos")}>
-              <span>✋</span>
-              <span>Dispos</span>
-            </button>
-            <button className={`tab ${onglet === "demande" ? "active" : ""}`} onClick={() => setOnglet("demande")}>
-              <span>📋</span>
-              <span>Demande</span>
-            </button>
-            <button className={`tab ${onglet === "planning" ? "active" : ""}`} onClick={() => setOnglet("planning")}>
-              <span>📅</span>
-              <span>Planning</span>
-            </button>
-            <button className={`tab ${onglet === "historique" ? "active" : ""}`} onClick={() => setOnglet("historique")}>
-              <span>📜</span>
-              <span>Historique</span>
-            </button>
-          </div>
+          <button className={`tab ${onglet === 'dispos' ? 'active' : ''}`} onClick={() => setOnglet('dispos')}>
+            <span className="tab-icon">✋</span>
+            <span>Disponibilités</span>
+          </button>
+          <button className={`tab ${onglet === 'demande' ? 'active' : ''}`} onClick={() => setOnglet('demande')}>
+            <span className="tab-icon">📝</span>
+            <span>Demande</span>
+          </button>
+          <button className={`tab ${onglet === 'planning' ? 'active' : ''}`} onClick={() => setOnglet('planning')}>
+            <span className="tab-icon">📅</span>
+            <span>Planning</span>
+          </button>
+          <button className={`tab ${onglet === 'historique' ? 'active' : ''}`} onClick={() => setOnglet('historique')}>
+            <span className="tab-icon">📋</span>
+            <span>Historique</span>
+          </button>
         </div>
       </nav>
 
       {/* Main */}
       <main className="main">
-        {/* === VUE DISPONIBILITÉS === */}
-        <div className={`view ${onglet === "dispos" ? "active" : ""}`}>
-          <div className="week-header">
-            <div className="week-header-top">
-              <div>
-                <p className="week-label">Semaine</p>
-                <p className="week-dates">20 - 25 Janvier 2025</p>
-              </div>
-              <div>
-                <p className="week-hours-label">Total prévu</p>
-                <p className="week-hours">{calculerHeures()}h</p>
-              </div>
-            </div>
-            <div className="deadline-badge">
-              ⏰ Date limite : <strong>Dimanche 19 janvier à 20h</strong>
-            </div>
-          </div>
-
-          <div className="quick-actions">
-            <button className="quick-action-btn primary" onClick={() => setAllAvailable(true)}>
-              ✓ Tout disponible
-            </button>
-            <button className="quick-action-btn secondary" onClick={() => setAllAvailable(false)}>
-              ✗ Tout effacer
-            </button>
-          </div>
-
-          {jours.map((jour) => {
-            const dispo = disponibilites[jour.id];
-            return (
-              <div key={jour.id} className={`day-card ${dispo.disponible ? "available" : ""}`}>
-                <div className="day-header">
-                  <div className="day-header-left">
-                    <div className="day-number">{jour.shortDate}</div>
-                    <div>
-                      <div className="day-name">{jour.nom}</div>
-                      <div className="day-date">{jour.date}</div>
-                    </div>
-                  </div>
-                  {dispo.disponible && (
-                    <div className="day-hours">
-                      {formatHeure(dispo.debut)} - {formatHeure(dispo.fin)}
-                    </div>
-                  )}
-                </div>
-                <div className="day-content">
-                  <div className="toggle-btns">
-                    <button
-                      className={`toggle-btn ${dispo.disponible ? "available" : ""}`}
-                      onClick={() => toggleDispo(jour.id, true)}
-                    >
-                      ✓ Disponible
-                    </button>
-                    <button
-                      className={`toggle-btn ${!dispo.disponible ? "unavailable" : ""}`}
-                      onClick={() => toggleDispo(jour.id, false)}
-                    >
-                      ✗ Indisponible
-                    </button>
-                  </div>
-
-                  <div className={`time-selector ${dispo.disponible ? "visible" : ""}`}>
-                    <div className="time-input">
-                      <label>Début</label>
-                      <select value={dispo.debut} onChange={(e) => updateHeure(jour.id, "debut", e.target.value)}>
-                        {heuresDebut.map((h) => (
-                          <option key={h} value={h}>
-                            {formatHeure(h)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <span className="time-arrow">→</span>
-                    <div className="time-input">
-                      <label>Fin</label>
-                      <select value={dispo.fin} onChange={(e) => updateHeure(jour.id, "fin", e.target.value)}>
-                        {heuresFin.map((h) => (
-                          <option key={h} value={h}>
-                            {formatHeure(h)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className={`quick-select ${dispo.disponible ? "visible" : ""}`}>
-                    <button className="quick-btn" onClick={() => quickSelect(jour.id, "matin")}>
-                      🌅 Matin
-                    </button>
-                    <button className="quick-btn" onClick={() => quickSelect(jour.id, "aprem")}>
-                      🌆 Après-midi
-                    </button>
-                    <button className="quick-btn" onClick={() => quickSelect(jour.id, "soir")}>
-                      🌙 Soir
-                    </button>
-                    <button className="quick-btn" onClick={() => quickSelect(jour.id, "journee")}>
-                      ☀️ Journée
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-
-          <button className="submit-btn" onClick={saveDisponibilites}>
-            ✓ Enregistrer mes disponibilités
-          </button>
-        </div>
-
-        {/* === VUE DEMANDE === */}
-        <div className={`view ${onglet === "demande" ? "active" : ""}`}>
+        {/* Vue Disponibilités */}
+        <div className={`view ${onglet === 'dispos' ? 'active' : ''}`}>
           <div className="card">
-            <h2 className="card-title">📋 Nouvelle demande</h2>
+            <div className="card-header">
+              <div className="card-title">✋ Mes disponibilités</div>
+              <div className="card-subtitle">Semaine du {new Date(semaineDebut).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</div>
+              <div className="total-badge">⏱️ Total: {calculerTotalHeures()}</div>
+            </div>
+            <div className="card-body">
+              <div className="quick-actions">
+                <button className="quick-btn" onClick={setAllAvailable}>✅ Tout disponible</button>
+                <button className="quick-btn" onClick={clearAll}>❌ Tout effacer</button>
+              </div>
 
-            <div className="form-group">
-              <label className="form-label">Type de demande</label>
-              <div className="type-grid">
-                {[
-                  { id: "conge", icon: "🏖️", label: "Congé" },
-                  { id: "echange", icon: "🔄", label: "Échange" },
-                  { id: "maladie", icon: "🏥", label: "Maladie" },
-                  { id: "autre", icon: "📝", label: "Autre" },
-                ].map((type) => (
-                  <div
-                    key={type.id}
-                    className={`type-option ${formDemande.type === type.id ? "selected" : ""}`}
-                    onClick={() => setFormDemande({ ...formDemande, type: type.id })}
-                  >
-                    <div className="icon">{type.icon}</div>
-                    <div className="label">{type.label}</div>
+              <div className="day-grid">
+                {joursLabels.map((jour, index) => (
+                  <div key={jour.key} className={`day-card ${dispoForm[jour.key].disponible ? 'available' : ''}`}>
+                    <div className="day-header">
+                      <div>
+                        <div className="day-name">{jour.label}</div>
+                        <div className="day-date">{getDateForDay(index)} janvier</div>
+                      </div>
+                      <button 
+                        className={`toggle-btn ${dispoForm[jour.key].disponible ? 'on' : 'off'}`}
+                        onClick={() => toggleDispo(jour.key)}
+                      />
+                    </div>
+                    {dispoForm[jour.key].disponible && (
+                      <div className="time-selectors">
+                        <select 
+                          className="time-select" 
+                          value={dispoForm[jour.key].debut}
+                          onChange={(e) => updateHeure(jour.key, 'debut', e.target.value)}
+                        >
+                          {heures.map(h => <option key={h} value={h}>{formatHeure(h)}</option>)}
+                        </select>
+                        <span className="time-arrow">→</span>
+                        <select 
+                          className="time-select" 
+                          value={dispoForm[jour.key].fin}
+                          onChange={(e) => updateHeure(jour.key, 'fin', e.target.value)}
+                        >
+                          {heures.map(h => <option key={h} value={h}>{formatHeure(h)}</option>)}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
-            </div>
 
-            <div className="form-group">
-              <label className="form-label">Période concernée</label>
-              <div className="date-row">
-                <div className="date-input">
-                  <label>Du</label>
-                  <input
-                    type="date"
-                    value={formDemande.dateDebut}
-                    onChange={(e) => setFormDemande({ ...formDemande, dateDebut: e.target.value })}
-                  />
-                </div>
-                <span className="date-arrow">→</span>
-                <div className="date-input">
-                  <label>Au</label>
-                  <input
-                    type="date"
-                    value={formDemande.dateFin}
-                    onChange={(e) => setFormDemande({ ...formDemande, dateFin: e.target.value })}
-                  />
-                </div>
+              <div style={{ marginTop: 20 }}>
+                <button className="btn btn-primary" onClick={saveDisponibilites} disabled={savingDispo}>
+                  {savingDispo ? '⏳ Enregistrement...' : '💾 Enregistrer mes disponibilités'}
+                </button>
               </div>
             </div>
-
-            <div className="form-group">
-              <label className="form-label">Créneau horaire</label>
-              <div className="creneau-btns">
-                {[
-                  { id: "journee", label: "☀️ Journée" },
-                  { id: "matin", label: "🌅 Matin" },
-                  { id: "apres-midi", label: "🌆 Après-midi" },
-                ].map((creneau) => (
-                  <button
-                    key={creneau.id}
-                    className={`creneau-btn ${formDemande.creneau === creneau.id ? "selected" : ""}`}
-                    onClick={() => setFormDemande({ ...formDemande, creneau: creneau.id })}
-                  >
-                    {creneau.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Motif</label>
-              <textarea
-                className="form-textarea"
-                placeholder="Expliquez brièvement la raison..."
-                value={formDemande.motif}
-                onChange={(e) => setFormDemande({ ...formDemande, motif: e.target.value })}
-              />
-            </div>
-
-            <div className="info-box">
-              <div className="icon">ℹ️</div>
-              <div>
-                <p className="title">Que se passe-t-il ensuite ?</p>
-                <p className="text">Votre demande sera transmise à la titulaire qui cherchera un remplaçant.</p>
-              </div>
-            </div>
-
-            <button className="submit-btn blue" onClick={sendDemande}>
-              📤 Envoyer ma demande
-            </button>
           </div>
         </div>
 
-        {/* === VUE PLANNING === */}
-        <div className={`view ${onglet === "planning" ? "active" : ""}`}>
-          <div className="planning-header">
-            <p className="label">Votre planning</p>
-            <p className="dates">Semaine du 13 - 18 Janvier</p>
-          </div>
-
+        {/* Vue Demande */}
+        <div className={`view ${onglet === 'demande' ? 'active' : ''}`}>
           <div className="card">
-            {[
-              { jour: "Lundi", date: "13 jan", num: "13", horaire: "17h00 - 20h30", working: true },
-              { jour: "Mardi", date: "14 jan", num: "14", horaire: "17h00 - 20h30", working: true },
-              { jour: "Mercredi", date: "15 jan", num: "15", horaire: "Repos", working: false },
-              { jour: "Jeudi", date: "16 jan", num: "16", horaire: "Repos", working: false },
-              { jour: "Vendredi", date: "17 jan", num: "17", horaire: "14h00 - 20h30", working: true },
-              { jour: "Samedi", date: "18 jan", num: "18", horaire: "8h30 - 14h00", working: true },
-            ].map((item) => (
-              <div key={item.jour} className="planning-day">
-                <div className="planning-day-left">
-                  <div className={`planning-day-number ${item.working ? "working" : "off"}`}>{item.num}</div>
-                  <div>
-                    <div className="planning-day-name">{item.jour}</div>
-                    <div className="planning-day-date">{item.date}</div>
+            <div className="card-header card-header-purple">
+              <div className="card-title">📝 Nouvelle demande</div>
+              <div className="card-subtitle">Congé, échange ou absence</div>
+            </div>
+            <div className="card-body">
+              <div className="form-group">
+                <label className="form-label">Type de demande</label>
+                <div className="type-grid">
+                  {[
+                    { id: 'conge', icon: '🏖️', label: 'Congé' },
+                    { id: 'echange', icon: '🔄', label: 'Échange' },
+                    { id: 'maladie', icon: '🏥', label: 'Maladie' },
+                    { id: 'autre', icon: '📋', label: 'Autre' },
+                  ].map(type => (
+                    <div 
+                      key={type.id}
+                      className={`type-option ${demandeForm.type === type.id ? 'selected' : ''}`}
+                      onClick={() => setDemandeForm({ ...demandeForm, type: type.id as any })}
+                    >
+                      <div className="type-icon">{type.icon}</div>
+                      <div className="type-label">{type.label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Date de début</label>
+                <input 
+                  type="date" 
+                  className="form-input"
+                  value={demandeForm.date_debut}
+                  onChange={(e) => setDemandeForm({ ...demandeForm, date_debut: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Date de fin</label>
+                <input 
+                  type="date" 
+                  className="form-input"
+                  value={demandeForm.date_fin}
+                  onChange={(e) => setDemandeForm({ ...demandeForm, date_fin: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Créneau</label>
+                <div className="creneau-grid">
+                  {[
+                    { id: 'journee', label: 'Journée' },
+                    { id: 'matin', label: 'Matin' },
+                    { id: 'apres-midi', label: 'Après-midi' },
+                  ].map(creneau => (
+                    <div 
+                      key={creneau.id}
+                      className={`creneau-option ${demandeForm.creneau === creneau.id ? 'selected' : ''}`}
+                      onClick={() => setDemandeForm({ ...demandeForm, creneau: creneau.id as any })}
+                    >
+                      {creneau.label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Motif</label>
+                <textarea 
+                  className="form-input form-textarea"
+                  placeholder="Expliquez brièvement la raison..."
+                  value={demandeForm.motif}
+                  onChange={(e) => setDemandeForm({ ...demandeForm, motif: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="checkbox-label">
+                  <input 
+                    type="checkbox" 
+                    checked={demandeForm.urgent}
+                    onChange={(e) => setDemandeForm({ ...demandeForm, urgent: e.target.checked })}
+                  />
+                  <span>⚡ Demande urgente</span>
+                </label>
+              </div>
+
+              <button className="btn btn-success" onClick={sendDemande} disabled={sendingDemande}>
+                {sendingDemande ? '⏳ Envoi...' : '📤 Envoyer la demande'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Vue Planning */}
+        <div className={`view ${onglet === 'planning' ? 'active' : ''}`}>
+          <div className="card">
+            <div className="card-header card-header-green">
+              <div className="card-title">📅 Mon planning</div>
+              <div className="card-subtitle">Semaine du {new Date(semaineDebut).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</div>
+            </div>
+            <div className="card-body">
+              {joursLabels.map((jour, index) => {
+                const dateStr = (() => {
+                  const d = new Date(semaineDebut);
+                  d.setDate(d.getDate() + index);
+                  return d.toISOString().split('T')[0];
+                })();
+                const dayPlan = planning.find(p => p.date === dateStr);
+                
+                return (
+                  <div key={jour.key} className="planning-day">
+                    <div className="planning-day-header">
+                      <span className="planning-day-name">{jour.label} {getDateForDay(index)}</span>
+                      <span className={`planning-badge ${dayPlan ? 'working' : 'off'}`}>
+                        {dayPlan ? '✓ Travail' : 'Repos'}
+                      </span>
+                    </div>
+                    {dayPlan && (
+                      <div className="planning-hours">
+                        🕐 {formatHeure(dayPlan.debut)} → {formatHeure(dayPlan.fin)}
+                      </div>
+                    )}
                   </div>
-                </div>
-                <div className={`planning-badge ${item.working ? "working" : "off"}`}>{item.horaire}</div>
-              </div>
-            ))}
-
-            <div className="planning-total">
-              <div>
-                <p className="planning-total-label">Total cette semaine</p>
-                <p className="planning-total-value">17h30</p>
-              </div>
-              <div className="planning-total-icon">📊</div>
+                );
+              })}
             </div>
           </div>
         </div>
 
-        {/* === VUE HISTORIQUE === */}
-        <div className={`view ${onglet === "historique" ? "active" : ""}`}>
-          <h2 className="card-title">📜 Historique des demandes</h2>
-
-          <div className="history-item">
-            <div className="history-header">
-              <div className="history-left">
-                <div className="history-icon">🏖️</div>
-                <div>
-                  <div className="history-type">Congé</div>
-                  <div className="history-date">Demandé le 8 janvier 2025</div>
+        {/* Vue Historique */}
+        <div className={`view ${onglet === 'historique' ? 'active' : ''}`}>
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">📋 Historique des demandes</div>
+            </div>
+            <div className="card-body">
+              {demandes.length === 0 ? (
+                <div className="empty-state">
+                  <p>Aucune demande pour le moment</p>
                 </div>
-              </div>
-              <span className="status-badge approved">✓ Approuvé</span>
-            </div>
-            <div className="history-details">
-              <p>
-                <strong>Date :</strong> Vendredi 10 janvier (après-midi)
-              </p>
-              <p>
-                <strong>Motif :</strong> Examen à la fac
-              </p>
-              <p className="history-note success">→ Remplacé par Nicolas</p>
-            </div>
-          </div>
-
-          <div className="history-item">
-            <div className="history-header">
-              <div className="history-left">
-                <div className="history-icon">🔄</div>
-                <div>
-                  <div className="history-type">Échange</div>
-                  <div className="history-date">Demandé le 2 janvier 2025</div>
-                </div>
-              </div>
-              <span className="status-badge approved">✓ Approuvé</span>
-            </div>
-            <div className="history-details">
-              <p>
-                <strong>Date :</strong> Samedi 4 janvier
-              </p>
-              <p>
-                <strong>Motif :</strong> Échange avec Celya
-              </p>
-            </div>
-          </div>
-
-          <div className="history-item">
-            <div className="history-header">
-              <div className="history-left">
-                <div className="history-icon">🏖️</div>
-                <div>
-                  <div className="history-type">Congé</div>
-                  <div className="history-date">Demandé le 15 décembre 2024</div>
-                </div>
-              </div>
-              <span className="status-badge rejected">✗ Refusé</span>
-            </div>
-            <div className="history-details">
-              <p>
-                <strong>Date :</strong> Samedi 21 décembre
-              </p>
-              <p>
-                <strong>Motif :</strong> Fête de famille
-              </p>
-              <p className="history-note error">→ Aucun remplaçant disponible</p>
+              ) : (
+                demandes.map(demande => {
+                  const status = getStatusBadge(demande.status);
+                  return (
+                    <div key={demande.id} className="demande-card">
+                      <div className="demande-header">
+                        <span className="demande-type">
+                          {demande.type === 'conge' && '🏖️ Congé'}
+                          {demande.type === 'echange' && '🔄 Échange'}
+                          {demande.type === 'maladie' && '🏥 Maladie'}
+                          {demande.type === 'autre' && '📋 Autre'}
+                        </span>
+                        <span className="demande-status" style={{ background: status.bg, color: status.color }}>
+                          {status.text}
+                        </span>
+                      </div>
+                      <div className="demande-details">
+                        📅 {new Date(demande.date_debut).toLocaleDateString('fr-FR')} 
+                        {demande.date_debut !== demande.date_fin && ` → ${new Date(demande.date_fin).toLocaleDateString('fr-FR')}`}
+                        <br />
+                        💬 {demande.motif || 'Pas de motif'}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
-
-        <a href="/" className="back-link">
-          ← Retour à l'accueil
-        </a>
       </main>
 
       {/* Toast */}
-      <div className={`toast ${toast.type} ${toast.visible ? "active" : ""}`}>
-        <span>{toast.type === "success" ? "✓" : "✗"}</span>
+      <div className={`toast ${toast.type} ${toast.visible ? 'active' : ''}`}>
+        <span>{toast.type === 'success' ? '✓' : '✗'}</span>
         <span>{toast.message}</span>
       </div>
-
-      {/* Overlay pour fermer dropdown */}
-      {showUserDropdown && <div style={{ position: "fixed", inset: 0, zIndex: 50 }} onClick={() => setShowUserDropdown(false)} />}
-    </>
+    </div>
   );
 }
