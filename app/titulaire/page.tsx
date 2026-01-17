@@ -1,893 +1,1038 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
-import type { Employee, Disponibilite, Planning, Demande } from '@/types/database';
-import { sendDemandeApprovedEmail, sendDemandeRefusedEmail } from '@/lib/use-email';
+import {
+  DndContext,
+  DragOverlay,
+  useSensor,
+  useSensors,
+  PointerSensor,
+  DragStartEvent,
+  DragEndEvent,
+  DragOverEvent,
+  closestCenter,
+} from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
+import { useDraggable, useDroppable } from '@dnd-kit/core';
+
+import {
+  useEmployees,
+  useDisponibilites,
+  usePlanning,
+  useDemandes,
+  useStats,
+  supabase,
+} from '@/lib/hooks';
+import { exportPlanningToPDF, exportDisponibilitesToPDF } from '@/lib/export-pdf';
+import type {
+  Employee,
+  Disponibilite,
+  Planning,
+  Demande,
+  PlanningSlot,
+  JourKey,
+} from '@/types';
+import { JOURS, JOURS_KEYS, HORAIRES } from '@/types';
+
+import '@/styles/titulaire.css';
+
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
+
+function getMondayOfWeek(date: Date): string {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  d.setDate(diff);
+  return d.toISOString().split('T')[0];
+}
+
+function formatWeekRange(mondayStr: string): string {
+  const monday = new Date(mondayStr);
+  const saturday = new Date(monday);
+  saturday.setDate(monday.getDate() + 5);
+  
+  const formatDate = (d: Date) => d.toLocaleDateString('fr-FR', {
+    day: 'numeric',
+    month: 'short',
+  });
+  
+  return `${formatDate(monday)} - ${formatDate(saturday)} ${monday.getFullYear()}`;
+}
+
+function getDateForDay(mondayStr: string, dayIndex: number): string {
+  const monday = new Date(mondayStr);
+  const date = new Date(monday);
+  date.setDate(monday.getDate() + dayIndex);
+  return date.toISOString().split('T')[0];
+}
+
+function generateSlotId(): string {
+  return `slot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// ============================================
+// DRAGGABLE EMPLOYEE COMPONENT
+// ============================================
+
+interface DraggableEmployeeProps {
+  employee: Employee;
+  disponibilite?: { debut: string; fin: string };
+}
+
+function DraggableEmployee({ employee, disponibilite }: DraggableEmployeeProps) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `employee-${employee.id}`,
+    data: { employee, disponibilite },
+  });
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  const roleClass = employee.role.toLowerCase().replace('é', 'e');
+  const initials = `${employee.prenom[0]}${employee.nom?.[0] || ''}`.toUpperCase();
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...listeners}
+      {...attributes}
+      className={`employee-draggable ${isDragging ? 'dragging' : ''}`}
+    >
+      <div className={`employee-avatar ${roleClass}`}>
+        {initials}
+      </div>
+      <div className="employee-info">
+        <div className="name">{employee.prenom} {employee.nom?.[0]}.</div>
+        {disponibilite && (
+          <div className="hours">
+            {disponibilite.debut?.slice(0, 5)} - {disponibilite.fin?.slice(0, 5)}
+          </div>
+        )}
+      </div>
+      <span className={`employee-role-badge ${roleClass}`}>
+        {employee.role}
+      </span>
+    </div>
+  );
+}
+
+// ============================================
+// DROPPABLE CELL COMPONENT
+// ============================================
+
+interface DroppableCellProps {
+  id: string;
+  date: string;
+  creneau: 'matin' | 'apres_midi';
+  children: React.ReactNode;
+}
+
+function DroppableCell({ id, date, creneau, children }: DroppableCellProps) {
+  const { isOver, setNodeRef } = useDroppable({
+    id,
+    data: { date, creneau },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`planning-cell drop-zone ${isOver ? 'drag-over' : ''}`}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ============================================
+// ASSIGNED EMPLOYEE IN CELL
+// ============================================
+
+interface AssignedEmployeeCardProps {
+  slot: PlanningSlot;
+  onRemove: (slotId: string) => void;
+  onUpdateTime: (slotId: string, field: 'debut' | 'fin', value: string) => void;
+}
+
+function AssignedEmployeeCard({ slot, onRemove, onUpdateTime }: AssignedEmployeeCardProps) {
+  const roleClass = slot.employee.role.toLowerCase().replace('é', 'e');
+  const initials = `${slot.employee.prenom[0]}${slot.employee.nom?.[0] || ''}`.toUpperCase();
+
+  return (
+    <div className="assigned-employee">
+      <div className="employee-header">
+        <div className={`employee-avatar ${roleClass}`} style={{ width: 28, height: 28, fontSize: 11 }}>
+          {initials}
+        </div>
+        <span className="employee-name">
+          {slot.employee.prenom} {slot.employee.nom?.[0]}.
+        </span>
+        <button
+          className="remove-btn"
+          onClick={() => onRemove(slot.id)}
+          title="Retirer"
+        >
+          ×
+        </button>
+      </div>
+      <div className="time-inputs">
+        <input
+          type="time"
+          className="time-input"
+          value={slot.debut}
+          onChange={(e) => onUpdateTime(slot.id, 'debut', e.target.value)}
+        />
+        <span className="time-separator">→</span>
+        <input
+          type="time"
+          className="time-input"
+          value={slot.fin}
+          onChange={(e) => onUpdateTime(slot.id, 'fin', e.target.value)}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// MAIN PAGE COMPONENT
+// ============================================
 
 export default function TitulairePage() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [onglet, setOnglet] = useState("dispos");
-  const [toast, setToast] = useState({ visible: false, message: "", type: "success" });
   
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [disponibilites, setDisponibilites] = useState<Disponibilite[]>([]);
-  const [planning, setPlanning] = useState<Planning[]>([]);
-  const [demandes, setDemandes] = useState<Demande[]>([]);
+  // Week navigation
+  const [semaineDebut, setSemaineDebut] = useState(() => getMondayOfWeek(new Date()));
   
-  const [showModal, setShowModal] = useState<string | null>(null);
-  const [selectedRole, setSelectedRole] = useState("Etudiant");
-  const [editData, setEditData] = useState<Employee | null>(null);
-  const [deleteData, setDeleteData] = useState<Employee | null>(null);
-  const [formData, setFormData] = useState({ prenom: "", nom: "", email: "", tel: "" });
+  // Active tab
+  const [activeTab, setActiveTab] = useState<'disponibilites' | 'demandes' | 'planning' | 'equipe'>('planning');
   
-  const [selectedDay, setSelectedDay] = useState(0);
-  const [showAddToPlanning, setShowAddToPlanning] = useState(false);
-  const [planningForm, setPlanningForm] = useState({ employeeId: 0, debut: "08:30", fin: "14:00" });
+  // Planning state (local before save)
+  const [planningSlots, setPlanningSlots] = useState<PlanningSlot[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [draggedEmployee, setDraggedEmployee] = useState<Employee | null>(null);
+  
+  // Toast
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  
+  // Hooks
+  const { employees, loading: loadingEmployees, refetch: refetchEmployees, addEmployee, deleteEmployee } = useEmployees();
+  const { disponibilites, loading: loadingDispos, getEmployeesDisponibles, getDispoForDay } = useDisponibilites(semaineDebut);
+  const { planning, loading: loadingPlanning, saveBulkPlanning } = usePlanning(semaineDebut);
+  const { demandes, loading: loadingDemandes, updateDemandeStatus, pendingCount, urgentCount } = useDemandes();
+  
+  // Stats
+  const stats = useStats(semaineDebut, employees, disponibilites);
+  
+  // DnD sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    })
+  );
 
-  const getMondayOfWeek = () => {
-    const d = new Date();
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-    d.setDate(diff);
-    return d.toISOString().split('T')[0];
-  };
-
-  const [semaineDebut] = useState(getMondayOfWeek());
-
-  const jours = [
-    { nom: "Lundi", key: "lundi" },
-    { nom: "Mardi", key: "mardi" },
-    { nom: "Mercredi", key: "mercredi" },
-    { nom: "Jeudi", key: "jeudi" },
-    { nom: "Vendredi", key: "vendredi" },
-    { nom: "Samedi", key: "samedi" },
-  ];
-
-  const heures = ["08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30", "20:00", "20:30"];
-
+  // Load planning from DB into local state
   useEffect(() => {
-    const loadData = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        router.push('/auth/login');
-        return;
-      }
-
-      const { data: userData } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-
-      if (!userData || userData.user_type !== 'titulaire') {
-        router.push('/auth/login');
-        return;
-      }
-
-      await Promise.all([
-        loadEmployees(),
-        loadDisponibilites(),
-        loadPlanning(),
-        loadDemandes(),
-      ]);
-
-      setLoading(false);
-    };
-
-    loadData();
-  }, [router, semaineDebut]);
-
-  const loadEmployees = async () => {
-    const { data } = await supabase
-      .from('employees')
-      .select('*')
-      .order('role')
-      .order('prenom');
-    setEmployees(data || []);
-  };
-
-  const loadDisponibilites = async () => {
-    const { data } = await supabase
-      .from('disponibilites')
-      .select('*, employees(*)')
-      .eq('semaine_debut', semaineDebut);
-    setDisponibilites(data || []);
-  };
-
-  const loadPlanning = async () => {
-    const dateFin = new Date(semaineDebut);
-    dateFin.setDate(dateFin.getDate() + 5);
-    
-    const { data } = await supabase
-      .from('planning')
-      .select('*, employees(*)')
-      .gte('date', semaineDebut)
-      .lte('date', dateFin.toISOString().split('T')[0]);
-    setPlanning(data || []);
-  };
-
-  const loadDemandes = async () => {
-    const { data } = await supabase
-      .from('demandes')
-      .select('*, employees(*)')
-      .eq('status', 'en_attente')
-      .order('urgent', { ascending: false })
-      .order('created_at', { ascending: false });
-    setDemandes(data || []);
-  };
-
-  const showToast = (message: string, type: "success" | "error" = "success") => {
-    setToast({ visible: true, message, type });
-    setTimeout(() => setToast({ visible: false, message: "", type: "success" }), 3500);
-  };
-
-  const getInitiales = (prenom: string, nom: string) => {
-    if (nom) return prenom[0].toUpperCase() + nom[0].toUpperCase();
-    return prenom.substring(0, 2).toUpperCase();
-  };
-
-  const getAvatarClass = (role: string) => {
-    const classes: Record<string, string> = { 
-      Pharmacien: "avatar-green", 
-      Preparateur: "avatar-blue", 
-      Apprenti: "avatar-purple", 
-      Etudiant: "avatar-orange" 
-    };
-    return classes[role] || "avatar-orange";
-  };
-
-  const formatHeure = (h: string) => h?.replace(':', 'h') || '';
-
-  const heureToMinutes = (h: string) => {
-    const [hh, mm] = h.split(':').map(Number);
-    return hh * 60 + mm;
-  };
-
-  const calculerDuree = (debut: string, fin: string) => {
-    const diff = heureToMinutes(fin) - heureToMinutes(debut);
-    const h = Math.floor(diff / 60);
-    const m = diff % 60;
-    return m > 0 ? h + "h" + m.toString().padStart(2, "0") : h + "h";
-  };
-
-  const getDateForDay = (index: number) => {
-    const d = new Date(semaineDebut);
-    d.setDate(d.getDate() + index);
-    return d.toISOString().split('T')[0];
-  };
-
-  const getDateLabel = (index: number) => {
-    const d = new Date(semaineDebut);
-    d.setDate(d.getDate() + index);
-    return d.getDate() + " jan";
-  };
-
-  // CRUD Employés
-  const openAddModal = () => {
-    setFormData({ prenom: "", nom: "", email: "", tel: "" });
-    setSelectedRole("Etudiant");
-    setShowModal("add");
-  };
-
-  const openEditModal = (emp: Employee) => {
-    setEditData(emp);
-    setFormData({ prenom: emp.prenom, nom: emp.nom || "", email: emp.email || "", tel: emp.tel || "" });
-    setSelectedRole(emp.role);
-    setShowModal("edit");
-  };
-
-  const openDeleteModal = (emp: Employee) => {
-    setDeleteData(emp);
-    setShowModal("delete");
-  };
-
-  const addEmployee = async () => {
-    if (!formData.prenom.trim()) { showToast("Veuillez entrer un prénom", "error"); return; }
-    if (!formData.email.trim()) { showToast("Veuillez entrer un email", "error"); return; }
-
-    const { error } = await supabase
-      .from('employees')
-      .insert([{ 
-        prenom: formData.prenom, 
-        nom: formData.nom, 
-        email: formData.email, 
-        tel: formData.tel,
-        initial : formData.nom, 
-        role: selectedRole 
-      }]);
-
-    if (error) {
-      showToast("Erreur: " + error.message, "error");
+    if (planning.length > 0) {
+      const slots: PlanningSlot[] = planning.map((p) => ({
+        id: `db-${p.id}`,
+        employee_id: p.employee_id,
+        employee: p.employees!,
+        date: p.date,
+        debut: p.debut,
+        fin: p.fin,
+        creneau: p.creneau === 'matin' ? 'matin' : 'apres_midi',
+      }));
+      setPlanningSlots(slots);
     } else {
-      showToast(formData.prenom + " ajouté !");
-      setShowModal(null);
-      loadEmployees();
+      setPlanningSlots([]);
     }
+  }, [planning]);
+
+  // Show toast
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
   };
 
-  const saveEmployee = async () => {
-    if (!editData) return;
-    if (!formData.prenom.trim()) { showToast("Veuillez entrer un prénom", "error"); return; }
-
-    const { error } = await supabase
-      .from('employees')
-      .update({ 
-        prenom: formData.prenom, 
-        nom: formData.nom, 
-        email: formData.email, 
-        tel: formData.tel, 
-        role: selectedRole 
-      })
-      .eq('id', editData.id);
-
-    if (error) {
-      showToast("Erreur: " + error.message, "error");
-    } else {
-      showToast(formData.prenom + " modifié !");
-      setShowModal(null);
-      loadEmployees();
-    }
+  // Week navigation
+  const goToPreviousWeek = () => {
+    const current = new Date(semaineDebut);
+    current.setDate(current.getDate() - 7);
+    setSemaineDebut(current.toISOString().split('T')[0]);
   };
 
-  const confirmDelete = async () => {
-    if (!deleteData) return;
-
-    const { error } = await supabase
-      .from('employees')
-      .delete()
-      .eq('id', deleteData.id);
-
-    if (error) {
-      showToast("Erreur: " + error.message, "error");
-    } else {
-      showToast(deleteData.prenom + " supprimé", "error");
-      setShowModal(null);
-      loadEmployees();
-      loadPlanning();
-    }
+  const goToNextWeek = () => {
+    const current = new Date(semaineDebut);
+    current.setDate(current.getDate() + 7);
+    setSemaineDebut(current.toISOString().split('T')[0]);
   };
 
-  // Planning
-  const dayPlanning = planning.filter(p => p.date === getDateForDay(selectedDay));
-  const planningMatin = dayPlanning
-    .filter(p => heureToMinutes(p.debut) < heureToMinutes("14:00"))
-    .sort((a, b) => heureToMinutes(a.debut) - heureToMinutes(b.debut));
-  const planningAprem = dayPlanning
-    .filter(p => heureToMinutes(p.fin) > heureToMinutes("14:00"))
-    .sort((a, b) => heureToMinutes(a.debut) - heureToMinutes(b.debut));
-
-  const countPharmaciensMatin = planningMatin.filter(p => p.employees?.role === "Pharmacien").length;
-  const countPharmacienAprem = planningAprem.filter(p => p.employees?.role === "Pharmacien").length;
-
-  const employeesNotInPlanning = employees.filter(e => !dayPlanning.find(p => p.employee_id === e.id));
-
-  const addToPlanning = async () => {
-    if (!planningForm.employeeId) { showToast("Sélectionnez un employé", "error"); return; }
-
-    const { error } = await supabase
-      .from('planning')
-      .insert([{
-        employee_id: planningForm.employeeId,
-        date: getDateForDay(selectedDay),
-        debut: planningForm.debut,
-        fin: planningForm.fin,
-        valide: false,
-      }]);
-
-    if (error) {
-      showToast("Erreur: " + error.message, "error");
-    } else {
-      showToast("Ajouté au planning !");
-      setShowAddToPlanning(false);
-      setPlanningForm({ employeeId: 0, debut: "08:30", fin: "14:00" });
-      loadPlanning();
-    }
+  const goToCurrentWeek = () => {
+    setSemaineDebut(getMondayOfWeek(new Date()));
   };
 
-  const removeFromPlanning = async (planningId: number) => {
-    const { error } = await supabase
-      .from('planning')
-      .delete()
-      .eq('id', planningId);
-
-    if (error) {
-      showToast("Erreur: " + error.message, "error");
-    } else {
-      showToast("Retiré du planning");
-      loadPlanning();
-    }
-  };
-
-  const updatePlanningHours = async (planningId: number, field: 'debut' | 'fin', value: string) => {
-    await supabase
-      .from('planning')
-      .update({ [field]: value })
-      .eq('id', planningId);
-    loadPlanning();
-  };
-
-  // Demandes
-const updateDemandeStatus = async (demandeId: number, status: 'approuve' | 'refuse') => {
-  const demande = demandes.find(d => d.id === demandeId);
-  
-  const { error } = await supabase
-    .from('demandes')
-    .update({ status })
-    .eq('id', demandeId);
-
-  if (!error && demande?.employees?.email) {
-    // Envoyer l'email de notification
-    if (status === 'approuve') {
-      await sendDemandeApprovedEmail(
-        demande.employees.email,
-        demande.employees.prenom,
-        demande.type,
-        new Date(demande.date_debut).toLocaleDateString('fr-FR'),
-        demande.creneau
-      );
-    } else {
-      await sendDemandeRefusedEmail(
-        demande.employees.email,
-        demande.employees.prenom,
-        demande.type,
-        new Date(demande.date_debut).toLocaleDateString('fr-FR')
-      );
-    }
-    
-    showToast(status === 'approuve' ? "Demande approuvée ! Email envoyé" : "Demande refusée");
-  }
-  
-  loadDemandes();
-};
-
+  // Logout
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push('/auth/login');
   };
+// ============================================
+// DRAG & DROP HANDLERS
+// ============================================
 
-  // Filtres employés
-  const pharmaciens = employees.filter(e => e.role === "Pharmacien");
-  const preparateurs = employees.filter(e => e.role === "Preparateur");
-  const apprentis = employees.filter(e => e.role === "Apprenti");
-  const etudiants = employees.filter(e => e.role === "Etudiant");
+const handleDragStart = (event: DragStartEvent) => {
+  const { active } = event;
+  setActiveId(active.id as string);
+  
+  if (active.data.current?.employee) {
+    setDraggedEmployee(active.data.current.employee);
+  }
+};
 
-  // Disponibilités formatées
-  const getDispoForEmployee = (employeeId: number) => {
-    const dispo = disponibilites.find(d => d.employee_id === employeeId);
-    if (!dispo) return null;
-    return jours.map(jour => {
-      const key = jour.key as keyof Disponibilite;
-      const disponible = dispo[`${jour.key}_disponible` as keyof Disponibilite];
-      const debut = dispo[`${jour.key}_debut` as keyof Disponibilite] as string;
-      const fin = dispo[`${jour.key}_fin` as keyof Disponibilite] as string;
-      if (!disponible) return "-";
-      if (debut && fin) return formatHeure(debut) + "-" + formatHeure(fin);
-      return "?";
-    });
+const handleDragEnd = (event: DragEndEvent) => {
+  const { active, over } = event;
+  setActiveId(null);
+  setDraggedEmployee(null);
+
+  if (!over) return;
+
+  const employeeData = active.data.current;
+  const dropData = over.data.current;
+
+  if (!employeeData?.employee || !dropData?.date) return;
+
+  const employee = employeeData.employee as Employee;
+  const date = dropData.date as string;
+  const creneau = dropData.creneau as 'matin' | 'apres_midi';
+
+  // Check if already assigned to this slot
+  const alreadyAssigned = planningSlots.some(
+    (s) => s.employee_id === employee.id && s.date === date && s.creneau === creneau
+  );
+
+  if (alreadyAssigned) {
+    showToast('Cet employé est déjà assigné à ce créneau', 'error');
+    return;
+  }
+
+  // Get default hours based on disponibilite or default
+  const jourIndex = JOURS_KEYS.findIndex((_, i) => getDateForDay(semaineDebut, i) === date);
+  const jourKey = JOURS_KEYS[jourIndex];
+  const dispo = getDispoForDay(employee.id, jourKey);
+  
+  // Initialize with default hours
+  let defaultDebut: string = creneau === 'matin' ? HORAIRES.matin.debut : HORAIRES.apres_midi.debut;
+  let defaultFin: string = creneau === 'matin' 
+    ? HORAIRES.matin.fin 
+    : (jourIndex === 5 ? HORAIRES.samedi_apres_midi.fin : HORAIRES.apres_midi.fin);
+  
+  // If we have dispo hours, use them as constraints
+  if (dispo && dispo.debut && dispo.fin) {
+    const dispoDebut: string = dispo.debut;
+    const dispoFin: string = dispo.fin;
+    
+    if (creneau === 'matin') {
+      defaultDebut = dispoDebut > HORAIRES.matin.debut ? dispoDebut : HORAIRES.matin.debut;
+      defaultFin = dispoFin < HORAIRES.matin.fin ? dispoFin : HORAIRES.matin.fin;
+    } else {
+      defaultDebut = dispoDebut > HORAIRES.apres_midi.debut ? dispoDebut : HORAIRES.apres_midi.debut;
+      defaultFin = dispoFin;
+    }
+  }
+
+  // Add new slot
+  const newSlot: PlanningSlot = {
+    id: generateSlotId(),
+    employee_id: employee.id,
+    employee,
+    date,
+    debut: defaultDebut,
+    fin: defaultFin,
+    creneau,
   };
 
-  const etudiantsAvecDispos = etudiants.map(e => ({
-    ...e,
-    dispos: getDispoForEmployee(e.id),
-    hasDispos: disponibilites.some(d => d.employee_id === e.id),
-  }));
+  setPlanningSlots((prev) => [...prev, newSlot]);
+  showToast(`${employee.prenom} ajouté au planning`);
+};
 
-  const styles = `
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Inter', -apple-system, sans-serif; background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); min-height: 100vh; }
-    .header { position: sticky; top: 0; z-index: 100; background: linear-gradient(135deg, #1e293b, #0f172a); color: white; box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
-    .header-content { max-width: 1400px; margin: 0 auto; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; }
-    .logo-section { display: flex; align-items: center; gap: 12px; }
-    .logo { width: 44px; height: 44px; background: linear-gradient(135deg, #34d399, #059669); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; box-shadow: 0 4px 12px rgba(16,185,129,0.4); }
-    .logo-text h1 { font-size: 18px; font-weight: 700; }
-    .logo-text p { font-size: 12px; color: #94a3b8; }
-    .header-right { display: flex; align-items: center; gap: 12px; }
-    .notif-btn { position: relative; width: 40px; height: 40px; background: rgba(255,255,255,0.1); border-radius: 12px; display: flex; align-items: center; justify-content: center; border: none; cursor: pointer; font-size: 18px; }
-    .notif-badge { position: absolute; top: -4px; right: -4px; width: 20px; height: 20px; background: #ef4444; border-radius: 50%; font-size: 11px; font-weight: 700; color: white; display: flex; align-items: center; justify-content: center; }
-    .user-badge { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.1); padding: 6px 12px; border-radius: 10px; }
-    .user-avatar-header { width: 32px; height: 32px; background: linear-gradient(135deg, #ec4899, #be185d); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
-    .logout-btn { padding: 8px 14px; background: rgba(255,255,255,0.1); border: none; border-radius: 8px; color: white; font-size: 13px; cursor: pointer; }
-    .logout-btn:hover { background: rgba(255,255,255,0.2); }
-    .nav { position: sticky; top: 68px; z-index: 90; background: rgba(255,255,255,0.95); backdrop-filter: blur(20px); border-bottom: 1px solid #e2e8f0; }
-    .nav-content { max-width: 1400px; margin: 0 auto; padding: 8px 20px; display: flex; gap: 8px; flex-wrap: wrap; }
-    .tab { padding: 10px 20px; border: none; background: none; border-radius: 10px; font-size: 14px; font-weight: 600; color: #64748b; cursor: pointer; font-family: inherit; display: flex; align-items: center; gap: 8px; transition: all 0.2s; }
-    .tab:hover { background: #f1f5f9; }
-    .tab.active { background: linear-gradient(135deg, #10b981, #059669); color: white; box-shadow: 0 4px 12px rgba(16,185,129,0.3); }
-    .tab .badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 700; }
-    .tab.active .badge { background: rgba(255,255,255,0.2); }
-    .tab:not(.active) .badge { background: #e2e8f0; color: #64748b; }
-    .tab:not(.active) .badge.alert { background: #fee2e2; color: #dc2626; }
-    .main { max-width: 1400px; margin: 0 auto; padding: 24px 20px; }
-    .view { display: none; }
-    .view.active { display: block; }
-    .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px; }
-    .page-title { font-size: 24px; font-weight: 800; color: #1e293b; }
-    .page-subtitle { font-size: 14px; color: #64748b; margin-top: 4px; }
-    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
-    .stat-card { background: white; border-radius: 16px; padding: 20px; display: flex; align-items: center; gap: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
-    .stat-icon { width: 56px; height: 56px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
-    .stat-icon.green { background: linear-gradient(135deg, #d1fae5, #a7f3d0); }
-    .stat-icon.yellow { background: linear-gradient(135deg, #fef3c7, #fde68a); }
-    .stat-icon.blue { background: linear-gradient(135deg, #dbeafe, #bfdbfe); }
-    .stat-icon.red { background: linear-gradient(135deg, #fee2e2, #fecaca); }
-    .stat-value { font-size: 28px; font-weight: 800; color: #1e293b; }
-    .stat-label { font-size: 13px; color: #64748b; }
-    .card { background: white; border-radius: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); overflow: hidden; margin-bottom: 24px; }
-    .card-header { padding: 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
-    .card-title { font-size: 18px; font-weight: 700; color: #1e293b; }
-    .card-actions { display: flex; gap: 8px; }
-    .btn { padding: 10px 16px; border: none; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; }
-    .btn-secondary { background: #f1f5f9; color: #475569; }
-    .btn-secondary:hover { background: #e2e8f0; }
-    .btn-primary { background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; }
-    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59,130,246,0.3); }
-    .btn-success { background: linear-gradient(135deg, #10b981, #059669); color: white; }
-    .btn-success:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(16,185,129,0.3); }
-    .btn-danger { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
-    .btn-lg { padding: 14px 24px; font-size: 15px; }
-    table { width: 100%; border-collapse: collapse; }
-    th { text-align: left; padding: 14px 16px; font-weight: 600; color: #475569; background: #f8fafc; font-size: 13px; }
-    td { padding: 14px 16px; border-top: 1px solid #f1f5f9; }
-    tr:hover { background: #f8fafc; }
-    .employee-cell { display: flex; align-items: center; gap: 12px; }
-    .employee-avatar { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 700; }
-    .avatar-orange { background: linear-gradient(135deg, #fb923c, #ea580c); }
-    .avatar-yellow { background: linear-gradient(135deg, #fbbf24, #f59e0b); }
-    .avatar-green { background: linear-gradient(135deg, #34d399, #059669); }
-    .avatar-blue { background: linear-gradient(135deg, #60a5fa, #2563eb); }
-    .avatar-purple { background: linear-gradient(135deg, #a78bfa, #7c3aed); }
-    .employee-name { font-weight: 600; color: #1e293b; }
-    .employee-status { font-size: 12px; }
-    .status-ok { color: #10b981; }
-    .status-pending { color: #f59e0b; }
-    .dispo-badge { display: inline-block; padding: 6px 10px; border-radius: 8px; font-size: 12px; font-weight: 500; }
-    .dispo-badge.available { background: #d1fae5; color: #047857; }
-    .dispo-badge.unavailable { background: #fee2e2; color: #dc2626; }
-    .dispo-badge.pending { background: #fef3c7; color: #b45309; }
-    .day-selector { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 24px; }
-    .day-btn { padding: 16px 12px; border: 2px solid #e2e8f0; border-radius: 14px; background: white; cursor: pointer; text-align: center; font-family: inherit; transition: all 0.2s; }
-    .day-btn:hover { border-color: #cbd5e1; }
-    .day-btn.active { background: linear-gradient(135deg, #1e293b, #0f172a); border-color: transparent; color: white; }
-    .day-btn .day-name { font-weight: 700; font-size: 14px; }
-    .day-btn .day-date { font-size: 12px; opacity: 0.7; margin-top: 2px; }
-    .day-btn .day-count { margin-top: 8px; padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 600; display: inline-block; }
-    .day-btn:not(.active) .day-count.ok { background: #d1fae5; color: #047857; }
-    .day-btn:not(.active) .day-count.warning { background: #fef3c7; color: #b45309; }
-    .day-btn.active .day-count { background: rgba(255,255,255,0.2); }
-    .planning-container { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
-    .planning-section { background: white; border-radius: 20px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
-    .planning-section-header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e2e8f0; }
-    .planning-section-header.matin { background: linear-gradient(135deg, #fef3c7, #fde68a); }
-    .planning-section-header.aprem { background: linear-gradient(135deg, #dbeafe, #bfdbfe); }
-    .section-left { display: flex; align-items: center; gap: 12px; }
-    .section-icon { width: 48px; height: 48px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
-    .section-icon.matin { background: linear-gradient(135deg, #fbbf24, #f59e0b); }
-    .section-icon.aprem { background: linear-gradient(135deg, #3b82f6, #2563eb); }
-    .section-title { font-weight: 700; color: #1e293b; font-size: 16px; }
-    .section-hours { font-size: 13px; color: #64748b; }
-    .section-status { padding: 6px 14px; border-radius: 10px; font-size: 12px; font-weight: 600; }
-    .section-status.ok { background: #d1fae5; color: #047857; }
-    .section-status.warning { background: #fef3c7; color: #b45309; }
-    .timeline-container { padding: 20px; }
-    .planning-item { display: flex; align-items: center; gap: 12px; padding: 12px; background: #f8fafc; border-radius: 14px; margin-bottom: 10px; }
-    .planning-item-avatar { width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 700; }
-    .planning-item-info { flex: 1; }
-    .planning-item-name { font-weight: 600; color: #1e293b; font-size: 14px; }
-    .planning-item-role { font-size: 12px; color: #64748b; }
-    .planning-item-hours { display: flex; align-items: center; gap: 8px; }
-    .planning-item-hours select { padding: 8px 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 13px; font-family: inherit; background: white; cursor: pointer; min-width: 85px; }
-    .planning-item-duration { background: linear-gradient(135deg, #ecfdf5, #d1fae5); padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; color: #059669; }
-    .planning-item-remove { width: 32px; height: 32px; border-radius: 8px; border: none; background: #fee2e2; color: #dc2626; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; }
-    .add-employee-btn { width: 100%; padding: 14px; border: 2px dashed #cbd5e1; border-radius: 14px; background: none; color: #64748b; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 8px; }
-    .add-employee-btn:hover { border-color: #10b981; color: #10b981; background: #ecfdf5; }
-    .demande-card { background: white; border-radius: 16px; margin-bottom: 16px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
-    .demande-header { padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border-bottom: 1px solid #e2e8f0; flex-wrap: wrap; gap: 12px; }
-    .demande-header.urgent { background: linear-gradient(135deg, #fef3c7, #fde68a); }
-    .demande-employee { display: flex; align-items: center; gap: 12px; }
-    .demande-avatar { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: white; font-size: 14px; font-weight: 700; }
-    .demande-name { font-weight: 700; color: #1e293b; font-size: 16px; }
-    .demande-role { font-size: 13px; color: #64748b; }
-    .demande-type { padding: 8px 14px; border-radius: 10px; font-size: 13px; font-weight: 600; }
-    .type-conge { background: #dbeafe; color: #1e40af; }
-    .type-echange { background: #ede9fe; color: #5b21b6; }
-    .type-maladie { background: #fee2e2; color: #991b1b; }
-    .urgent-badge { background: #ef4444; color: white; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; margin-left: 8px; }
-    .demande-body { padding: 20px; }
-    .demande-info-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
-    .demande-info { background: #f8fafc; padding: 14px; border-radius: 12px; }
-    .demande-info-label { font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: 600; margin-bottom: 4px; }
-    .demande-info-value { font-weight: 600; color: #1e293b; }
-    .demande-motif { background: #f8fafc; padding: 14px; border-radius: 12px; margin-bottom: 16px; }
-    .demande-motif-text { color: #475569; font-style: italic; }
-    .demande-actions { display: flex; gap: 12px; }
-    .demande-actions .btn { flex: 1; justify-content: center; }
-    .equipe-section-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #e2e8f0; }
-    .equipe-section-title { font-weight: 700; color: #1e293b; font-size: 16px; }
-    .equipe-count { background: #e2e8f0; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; color: #64748b; }
-    .equipe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; padding: 20px; }
-    .equipe-card { background: #f8fafc; border-radius: 16px; padding: 16px; display: flex; align-items: center; gap: 14px; }
-    .equipe-card-avatar { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; color: white; font-size: 14px; font-weight: 700; }
-    .equipe-card-info { flex: 1; }
-    .equipe-card-name { font-weight: 700; color: #1e293b; font-size: 15px; }
-    .equipe-card-role { font-size: 13px; color: #64748b; }
-    .equipe-card-email { font-size: 12px; color: #94a3b8; margin-top: 4px; }
-    .equipe-card-actions { display: flex; gap: 6px; }
-    .equipe-card-btn { width: 38px; height: 38px; border-radius: 10px; border: none; cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; }
-    .equipe-card-btn.edit { background: #dbeafe; color: #2563eb; }
-    .equipe-card-btn.delete { background: #fee2e2; color: #dc2626; }
-    .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); z-index: 500; align-items: center; justify-content: center; padding: 20px; }
-    .modal-overlay.active { display: flex; }
-    .modal { background: white; border-radius: 24px; width: 100%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
-    .modal-header { padding: 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
-    .modal-title { font-size: 20px; font-weight: 700; color: #1e293b; }
-    .modal-close { width: 38px; height: 38px; border-radius: 10px; border: none; background: #f1f5f9; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center; }
-    .modal-body { padding: 24px; }
-    .modal-footer { padding: 20px 24px; border-top: 1px solid #e2e8f0; display: flex; gap: 12px; justify-content: flex-end; }
-    .form-group { margin-bottom: 20px; }
-    .form-label { display: block; font-weight: 600; color: #334155; font-size: 14px; margin-bottom: 8px; }
-    .form-input { width: 100%; padding: 14px 16px; background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 15px; font-family: inherit; }
-    .form-input:focus { outline: none; border-color: #10b981; background: white; }
-    .form-select { width: 100%; padding: 14px 16px; background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 15px; font-family: inherit; cursor: pointer; }
-    .role-selector { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-    .role-option { padding: 16px; border: 2px solid #e2e8f0; border-radius: 12px; cursor: pointer; text-align: center; }
-    .role-option:hover { border-color: #cbd5e1; }
-    .role-option.selected { border-color: #10b981; background: #ecfdf5; }
-    .role-option .role-icon { font-size: 28px; margin-bottom: 6px; }
-    .role-option .role-name { font-weight: 600; font-size: 13px; }
-    .confirm-text { font-size: 15px; color: #475569; text-align: center; padding: 20px 0; }
-    .confirm-name { font-weight: 700; color: #1e293b; }
-    .confirm-warning { background: #fef3c7; border-radius: 12px; padding: 14px; margin-top: 16px; display: flex; align-items: center; gap: 10px; font-size: 13px; color: #92400e; }
-    .toast { position: fixed; bottom: 24px; right: 24px; padding: 16px 24px; border-radius: 16px; display: flex; align-items: center; gap: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); z-index: 1000; opacity: 0; transform: translateY(20px); transition: all 0.3s; font-weight: 600; color: white; }
-    .toast.success { background: linear-gradient(135deg, #10b981, #059669); }
-    .toast.error { background: linear-gradient(135deg, #ef4444, #dc2626); }
-    .toast.active { opacity: 1; transform: translateY(0); }
-    .loading { display: flex; align-items: center; justify-content: center; min-height: 100vh; font-size: 18px; color: #64748b; }
-    .empty-state { text-align: center; padding: 40px 20px; color: #64748b; }
-    @media (max-width: 1024px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } .planning-container { grid-template-columns: 1fr; } }
-    @media (max-width: 768px) { .day-selector { grid-template-columns: repeat(3, 1fr); } .demande-info-grid { grid-template-columns: 1fr; } }
-  `;
+const handleDragOver = (event: DragOverEvent) => {
+  // Optional: visual feedback while dragging
+};
 
-  if (loading) {
+  // ============================================
+  // PLANNING SLOT HANDLERS
+  // ============================================
+
+  const removeSlot = (slotId: string) => {
+    setPlanningSlots((prev) => prev.filter((s) => s.id !== slotId));
+  };
+
+  const updateSlotTime = (slotId: string, field: 'debut' | 'fin', value: string) => {
+    setPlanningSlots((prev) =>
+      prev.map((s) => (s.id === slotId ? { ...s, [field]: value } : s))
+    );
+  };
+
+  // Save planning to database
+  const handleSavePlanning = async () => {
+    try {
+      const slotsToSave = planningSlots.map((s) => ({
+        employee_id: s.employee_id,
+        date: s.date,
+        debut: s.debut,
+        fin: s.fin,
+        creneau: s.creneau === 'matin' ? 'matin' : 'apres_midi',
+        valide: true,
+      }));
+
+      await saveBulkPlanning(slotsToSave as any);
+      showToast('Planning enregistré avec succès !');
+    } catch (error) {
+      console.error('Erreur sauvegarde:', error);
+      showToast('Erreur lors de la sauvegarde', 'error');
+    }
+  };
+
+  // ============================================
+  // DEMANDES HANDLERS
+  // ============================================
+
+  const handleApproveDemande = async (id: number) => {
+    await updateDemandeStatus(id, 'approuve');
+    showToast('Demande approuvée');
+  };
+
+  const handleRefuseDemande = async (id: number) => {
+    await updateDemandeStatus(id, 'refuse');
+    showToast('Demande refusée');
+  };
+
+  // ============================================
+  // RENDER HELPERS
+  // ============================================
+
+  const getSlotsForCell = (date: string, creneau: 'matin' | 'apres_midi') => {
+    return planningSlots.filter((s) => s.date === date && s.creneau === creneau);
+  };
+
+  // Get employees available for current day (sidebar)
+  const [selectedDayIndex, setSelectedDayIndex] = useState(0);
+  const selectedJourKey = JOURS_KEYS[selectedDayIndex];
+  const employeesDisponibles = getEmployeesDisponibles(selectedJourKey);
+
+  // ============================================
+  // LOADING STATE
+  // ============================================
+
+  if (loadingEmployees || loadingDispos || loadingPlanning) {
     return (
-      <div>
-        <style dangerouslySetInnerHTML={{ __html: styles }} />
-        <div className="loading">Chargement...</div>
+      <div className="titulaire-layout">
+        <div className="loading-spinner">
+          <div className="spinner"></div>
+        </div>
       </div>
     );
   }
 
+  // ============================================
+  // RENDER
+  // ============================================
+
   return (
-    <div>
-      <style dangerouslySetInnerHTML={{ __html: styles }} />
-
-      <header className="header">
-        <div className="header-content">
-          <div className="logo-section">
-            <div className="logo">📅</div>
-            <div className="logo-text"><h1>BaggPlanning</h1><p>Espace Titulaire</p></div>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragOver={handleDragOver}
+    >
+      <div className="titulaire-layout">
+        {/* HEADER */}
+        <header className="titulaire-header">
+          <div className="titulaire-logo">
+            <div className="titulaire-logo-icon">📅</div>
+            <div className="titulaire-logo-text">
+              <h1>BaggPlanning</h1>
+              <span>Espace Titulaire</span>
+            </div>
           </div>
-          <div className="header-right">
-            <button className="notif-btn">🔔{demandes.length > 0 && <span className="notif-badge">{demandes.length}</span>}</button>
-            <div className="user-badge"><div className="user-avatar-header">TI</div><span style={{ color: 'white' }}>Titulaire</span></div>
-            <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+
+          <div className="titulaire-user">
+            <div className="titulaire-week-selector">
+              <button onClick={goToPreviousWeek}>←</button>
+              <span>{formatWeekRange(semaineDebut)}</span>
+              <button onClick={goToNextWeek}>→</button>
+            </div>
+            <button className="btn btn-sm btn-secondary" onClick={goToCurrentWeek}>
+              Aujourd'hui
+            </button>
+            <button className="titulaire-logout" onClick={handleLogout}>
+              Déconnexion
+            </button>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <nav className="nav">
-        <div className="nav-content">
-          <button className={`tab ${onglet === "dispos" ? "active" : ""}`} onClick={() => setOnglet("dispos")}>
-            <span>✋</span><span>Disponibilités</span><span className="badge">{disponibilites.length}/{etudiants.length}</span>
-          </button>
-          <button className={`tab ${onglet === "demandes" ? "active" : ""}`} onClick={() => setOnglet("demandes")}>
-            <span>📋</span><span>Demandes</span><span className={`badge ${demandes.length > 0 ? 'alert' : ''}`}>{demandes.length}</span>
-          </button>
-          <button className={`tab ${onglet === "planning" ? "active" : ""}`} onClick={() => setOnglet("planning")}>
-            <span>📅</span><span>Planning</span>
-          </button>
-          <button className={`tab ${onglet === "equipe" ? "active" : ""}`} onClick={() => setOnglet("equipe")}>
-            <span>👥</span><span>Équipe</span><span className="badge">{employees.length}</span>
-          </button>
-        </div>
-      </nav>
-
-      <main className="main">
-        {/* VUE DISPONIBILITÉS */}
-        <div className={`view ${onglet === "dispos" ? "active" : ""}`}>
+        {/* CONTENT */}
+        <main className="titulaire-content">
+          {/* STATS */}
           <div className="stats-grid">
-            <div className="stat-card"><div className="stat-icon green">✅</div><div><div className="stat-value">{disponibilites.length}</div><div className="stat-label">Ont répondu</div></div></div>
-            <div className="stat-card"><div className="stat-icon yellow">⏳</div><div><div className="stat-value">{etudiants.length - disponibilites.length}</div><div className="stat-label">En attente</div></div></div>
-            <div className="stat-card"><div className="stat-icon blue">📊</div><div><div className="stat-value">{etudiants.length > 0 ? Math.round((disponibilites.length / etudiants.length) * 100) : 0}%</div><div className="stat-label">Taux de réponse</div></div></div>
-            <div className="stat-card"><div className="stat-icon red">⏰</div><div><div className="stat-value">2j</div><div className="stat-label">Avant deadline</div></div></div>
-          </div>
-
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title">📊 Matrice des disponibilités</div>
-              <div className="card-actions">
-                <button className="btn btn-secondary" onClick={loadDisponibilites}>🔄 Actualiser</button>
+            <div className="stat-card">
+              <div className="stat-icon green">👥</div>
+              <div className="stat-content">
+                <h3>{stats.totalEmployees}</h3>
+                <p>Employés actifs</p>
               </div>
             </div>
-            <div style={{ overflowX: "auto" }}>
-              <table>
-                <thead><tr><th>Étudiant</th>{jours.map(j => <th key={j.key}>{j.nom.substring(0,3)}</th>)}</tr></thead>
-                <tbody>
-                  {etudiantsAvecDispos.map(e => (
-                    <tr key={e.id} style={!e.hasDispos ? { background: "#fef3c7" } : {}}>
-                      <td>
-                        <div className="employee-cell">
-                          <div className={`employee-avatar ${e.hasDispos ? "avatar-orange" : "avatar-yellow"}`}>{getInitiales(e.prenom, e.nom)}</div>
-                          <div>
-                            <div className="employee-name">{e.prenom}</div>
-                            <div className={`employee-status ${e.hasDispos ? "status-ok" : "status-pending"}`}>{e.hasDispos ? "✓ Rempli" : "⏳ En attente"}</div>
+            <div className="stat-card">
+              <div className="stat-icon blue">✅</div>
+              <div className="stat-content">
+                <h3>{stats.etudiantsRepondu}/{stats.totalEtudiants}</h3>
+                <p>Étudiants ont répondu</p>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-icon yellow">⏳</div>
+              <div className="stat-content">
+                <h3>{stats.etudiantsEnAttente}</h3>
+                <p>En attente de réponse</p>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-icon red">📋</div>
+              <div className="stat-content">
+                <h3>{pendingCount}</h3>
+                <p>Demandes à traiter {urgentCount > 0 && <span style={{color: 'var(--color-danger)'}}>({urgentCount} urgentes)</span>}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* TABS */}
+          <div className="tabs-container">
+            <div className="tabs-header">
+              <button
+                className={`tab-button ${activeTab === 'disponibilites' ? 'active' : ''}`}
+                onClick={() => setActiveTab('disponibilites')}
+              >
+                📊 Disponibilités
+              </button>
+              <button
+                className={`tab-button ${activeTab === 'demandes' ? 'active' : ''}`}
+                onClick={() => setActiveTab('demandes')}
+              >
+                📝 Demandes
+                {pendingCount > 0 && <span className="tab-badge">{pendingCount}</span>}
+              </button>
+              <button
+                className={`tab-button ${activeTab === 'planning' ? 'active' : ''}`}
+                onClick={() => setActiveTab('planning')}
+              >
+                📅 Planning
+              </button>
+              <button
+                className={`tab-button ${activeTab === 'equipe' ? 'active' : ''}`}
+                onClick={() => setActiveTab('equipe')}
+              >
+                👥 Équipe
+              </button>
+            </div>
+
+            <div className="tab-content">
+              {/* ============================================
+                  TAB: PLANNING
+                  ============================================ */}
+              {activeTab === 'planning' && (
+                <div className="planning-container">
+                  {/* Sidebar: Available employees */}
+                  <div className="planning-sidebar">
+                    <div className="sidebar-card">
+                      <div className="sidebar-header">
+                        <h3>✋ Employés disponibles</h3>
+                        <p>Glissez vers le planning</p>
+                      </div>
+                      
+                      {/* Day selector */}
+                      <div style={{ padding: '12px', borderBottom: '1px solid var(--color-border)' }}>
+                        <select
+                          value={selectedDayIndex}
+                          onChange={(e) => setSelectedDayIndex(Number(e.target.value))}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            borderRadius: 'var(--radius-md)',
+                            border: '1px solid var(--color-border)',
+                            fontSize: '13px',
+                          }}
+                        >
+                          {JOURS.map((jour, i) => (
+                            <option key={i} value={i}>
+                              {jour} {new Date(getDateForDay(semaineDebut, i)).getDate()}/{new Date(getDateForDay(semaineDebut, i)).getMonth() + 1}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="sidebar-content">
+                        {employeesDisponibles.length === 0 ? (
+                          <div className="empty-state" style={{ padding: '24px' }}>
+                            <div className="empty-state-icon">😕</div>
+                            <p>Aucun employé disponible ce jour</p>
+                          </div>
+                        ) : (
+                          employeesDisponibles.map((emp) => (
+                            <DraggableEmployee
+                              key={emp.id}
+                              employee={emp}
+                              disponibilite={emp.disponibilite}
+                            />
+                          ))
+                        )}
+                        
+                        {/* Also show permanent staff */}
+                        <div style={{ 
+                          marginTop: '16px', 
+                          paddingTop: '16px', 
+                          borderTop: '1px solid var(--color-border)' 
+                        }}>
+                          <p style={{ 
+                            fontSize: '11px', 
+                            color: 'var(--color-text-muted)', 
+                            marginBottom: '8px',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.5px'
+                          }}>
+                            Personnel permanent
+                          </p>
+                          {employees
+                            .filter((e) => e.role === 'Pharmacien' || e.role === 'Preparateur')
+                            .map((emp) => (
+                              <DraggableEmployee key={emp.id} employee={emp} />
+                            ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <button className="btn btn-primary btn-lg" onClick={handleSavePlanning}>
+                        ✓ Enregistrer le planning
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => exportPlanningToPDF({
+                          planning: planningSlots.map(s => ({
+                            ...s,
+                            id: 0,
+                            employees: s.employee,
+                            valide: true,
+                            creneau: s.creneau,
+                          })) as any,
+                          semaineDebut,
+                          pharmacieName: 'Pharmacie',
+                        })}
+                      >
+                        📄 Exporter PDF
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Main: Planning grid */}
+                  <div className="planning-main">
+                    <div className="planning-grid">
+                      {/* Header with days */}
+                      <div className="planning-grid-header">
+                        {JOURS.map((jour, i) => {
+                          const date = new Date(getDateForDay(semaineDebut, i));
+                          return (
+                            <div key={i} className="planning-day-header">
+                              <div className="day-name">{jour}</div>
+                              <div className="day-date">
+                                {date.getDate()}/{date.getMonth() + 1}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Time ruler */}
+                      <div className="time-ruler">
+                        <span>8h30</span>
+                        <span>10h</span>
+                        <span>12h</span>
+                        <span>14h</span>
+                        <span>16h</span>
+                        <span>18h</span>
+                        <span>20h30</span>
+                      </div>
+
+                      {/* MATIN Row */}
+                      <div className="planning-row-header matin">
+                        🌅 MATIN (8h30 - 14h00)
+                      </div>
+                      <div className="planning-row">
+                        {JOURS.map((_, i) => {
+                          const date = getDateForDay(semaineDebut, i);
+                          const cellId = `cell-${date}-matin`;
+                          const slots = getSlotsForCell(date, 'matin');
+
+                          return (
+                            <DroppableCell
+                              key={cellId}
+                              id={cellId}
+                              date={date}
+                              creneau="matin"
+                            >
+                              {slots.map((slot) => (
+                                <AssignedEmployeeCard
+                                  key={slot.id}
+                                  slot={slot}
+                                  onRemove={removeSlot}
+                                  onUpdateTime={updateSlotTime}
+                                />
+                              ))}
+                            </DroppableCell>
+                          );
+                        })}
+                      </div>
+
+                      {/* APRES-MIDI Row */}
+                      <div className="planning-row-header apres-midi">
+                        🌆 APRÈS-MIDI (14h00 - 20h30)
+                      </div>
+                      <div className="planning-row">
+                        {JOURS.map((_, i) => {
+                          const date = getDateForDay(semaineDebut, i);
+                          const cellId = `cell-${date}-apres_midi`;
+                          const slots = getSlotsForCell(date, 'apres_midi');
+
+                          return (
+                            <DroppableCell
+                              key={cellId}
+                              id={cellId}
+                              date={date}
+                              creneau="apres_midi"
+                            >
+                              {slots.map((slot) => (
+                                <AssignedEmployeeCard
+                                  key={slot.id}
+                                  slot={slot}
+                                  onRemove={removeSlot}
+                                  onUpdateTime={updateSlotTime}
+                                />
+                              ))}
+                            </DroppableCell>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Legend */}
+                    <div style={{
+                      marginTop: '16px',
+                      padding: '12px 16px',
+                      background: 'var(--color-surface-hover)',
+                      borderRadius: 'var(--radius-md)',
+                      fontSize: '12px',
+                      color: 'var(--color-text-secondary)',
+                      display: 'flex',
+                      gap: '24px',
+                    }}>
+                      <span><span className="employee-avatar pharmacien" style={{ width: 20, height: 20, fontSize: 10, display: 'inline-flex', marginRight: 4 }}>P</span> Pharmacien</span>
+                      <span><span className="employee-avatar preparateur" style={{ width: 20, height: 20, fontSize: 10, display: 'inline-flex', marginRight: 4 }}>P</span> Préparateur</span>
+                      <span><span className="employee-avatar etudiant" style={{ width: 20, height: 20, fontSize: 10, display: 'inline-flex', marginRight: 4 }}>E</span> Étudiant</span>
+                      <span><span className="employee-avatar apprenti" style={{ width: 20, height: 20, fontSize: 10, display: 'inline-flex', marginRight: 4 }}>A</span> Apprenti</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ============================================
+                  TAB: DISPONIBILITES
+                  ============================================ */}
+              {activeTab === 'disponibilites' && (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                    <h2 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>
+                      Matrice des disponibilités - Semaine du {new Date(semaineDebut).toLocaleDateString('fr-FR')}
+                    </h2>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => exportDisponibilitesToPDF(disponibilites, employees, semaineDebut)}
+                    >
+                      📄 Exporter PDF
+                    </button>
+                  </div>
+
+                  {disponibilites.length === 0 ? (
+                    <div className="empty-state">
+                      <div className="empty-state-icon">📭</div>
+                      <h3>Aucune disponibilité reçue</h3>
+                      <p>Les étudiants n'ont pas encore rempli leurs disponibilités pour cette semaine.</p>
+                    </div>
+                  ) : (
+                    <div className="dispo-matrix">
+                      <table className="dispo-table">
+                        <thead>
+                          <tr>
+                            <th className="employee-col">Employé</th>
+                            {JOURS.map((jour, i) => (
+                              <th key={i}>
+                                {jour}<br />
+                                <span style={{ fontSize: '11px', fontWeight: 'normal', color: 'var(--color-text-muted)' }}>
+                                  {new Date(getDateForDay(semaineDebut, i)).getDate()}/{new Date(getDateForDay(semaineDebut, i)).getMonth() + 1}
+                                </span>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {employees
+                            .filter((e) => e.role === 'Etudiant' || e.role === 'Apprenti')
+                            .map((emp) => {
+                              const dispo = disponibilites.find((d) => d.employee_id === emp.id);
+                              return (
+                                <tr key={emp.id}>
+                                  <td className="employee-col">
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                      <div className={`employee-avatar ${emp.role.toLowerCase()}`} style={{ width: 32, height: 32, fontSize: 12 }}>
+                                        {emp.prenom[0]}{emp.nom?.[0]}
+                                      </div>
+                                      <div>
+                                        <div style={{ fontWeight: 600 }}>{emp.prenom} {emp.nom}</div>
+                                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{emp.role}</div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  {JOURS_KEYS.map((jourKey, i) => {
+                                    if (!dispo) {
+                                      return (
+                                        <td key={i}>
+                                          <span className="dispo-cell en-attente">⏳ En attente</span>
+                                        </td>
+                                      );
+                                    }
+                                    const disponible = dispo[`${jourKey}_disponible` as keyof Disponibilite] as boolean;
+                                    const debut = dispo[`${jourKey}_debut` as keyof Disponibilite] as string;
+                                    const fin = dispo[`${jourKey}_fin` as keyof Disponibilite] as string;
+
+                                    if (!disponible) {
+                                      return (
+                                        <td key={i}>
+                                          <span className="dispo-cell non-disponible">❌ Indispo</span>
+                                        </td>
+                                      );
+                                    }
+
+                                    return (
+                                      <td key={i}>
+                                        <span className="dispo-cell disponible">
+                                          ✅ {debut?.slice(0, 5)} - {fin?.slice(0, 5)}
+                                        </span>
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ============================================
+                  TAB: DEMANDES
+                  ============================================ */}
+              {activeTab === 'demandes' && (
+                <div>
+                  <h2 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '20px' }}>
+                    Demandes à traiter ({pendingCount})
+                  </h2>
+
+                  {demandes.filter((d) => d.status === 'en_attente').length === 0 ? (
+                    <div className="empty-state">
+                      <div className="empty-state-icon">✅</div>
+                      <h3>Aucune demande en attente</h3>
+                      <p>Toutes les demandes ont été traitées.</p>
+                    </div>
+                  ) : (
+                    <div className="demandes-list">
+                      {demandes
+                        .filter((d) => d.status === 'en_attente')
+                        .map((demande) => (
+                          <div
+                            key={demande.id}
+                            className={`demande-card ${demande.urgence ? 'urgente' : ''}`}
+                          >
+                            <div className="demande-avatar">
+                              {demande.employees?.prenom[0]}{demande.employees?.nom?.[0]}
+                            </div>
+                            <div className="demande-info">
+                              <h4>
+                                {demande.employees?.prenom} {demande.employees?.nom}
+                                <span className={`demande-badge ${demande.type}`}>
+                                  {demande.type === 'conge' && '🏖️ Congé'}
+                                  {demande.type === 'absence' && '🏥 Absence'}
+                                  {demande.type === 'echange' && '🔄 Échange'}
+                                  {demande.type === 'autre' && '📋 Autre'}
+                                </span>
+                                {demande.urgence && <span className="demande-badge urgente">⚠️ Urgent</span>}
+                              </h4>
+                              <p>{demande.motif || 'Pas de motif précisé'}</p>
+                              <div className="date">
+                                📅 {new Date(demande.date_debut).toLocaleDateString('fr-FR')}
+                                {demande.date_fin && demande.date_fin !== demande.date_debut && (
+                                  <> → {new Date(demande.date_fin).toLocaleDateString('fr-FR')}</>
+                                )}
+                                {demande.creneau && ` (${demande.creneau})`}
+                              </div>
+                            </div>
+                            <div className="demande-actions">
+                              <button
+                                className="btn btn-success btn-sm"
+                                onClick={() => handleApproveDemande(demande.id)}
+                              >
+                                ✓ Approuver
+                              </button>
+                              <button
+                                className="btn btn-danger btn-sm"
+                                onClick={() => handleRefuseDemande(demande.id)}
+                              >
+                                ✕ Refuser
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+
+                  {/* Historique */}
+                  <h3 style={{ fontSize: '16px', fontWeight: '600', marginTop: '32px', marginBottom: '16px', color: 'var(--color-text-secondary)' }}>
+                    Historique des demandes traitées
+                  </h3>
+                  <div className="demandes-list">
+                    {demandes
+                      .filter((d) => d.status !== 'en_attente')
+                      .slice(0, 5)
+                      .map((demande) => (
+                        <div key={demande.id} className="demande-card" style={{ opacity: 0.7 }}>
+                          <div className="demande-avatar">
+                            {demande.employees?.prenom[0]}{demande.employees?.nom?.[0]}
+                          </div>
+                          <div className="demande-info">
+                            <h4>
+                              {demande.employees?.prenom} {demande.employees?.nom}
+                              <span className={`demande-badge ${demande.type}`}>
+                                {demande.type}
+                              </span>
+                            </h4>
+                            <p>{demande.motif || 'Pas de motif précisé'}</p>
+                          </div>
+                          <span
+                            className={`demande-badge`}
+                            style={{
+                              background: demande.status === 'approuve' ? 'var(--color-primary-bg)' : 'var(--color-danger-bg)',
+                              color: demande.status === 'approuve' ? 'var(--color-primary-dark)' : 'var(--color-danger)',
+                            }}
+                          >
+                            {demande.status === 'approuve' ? '✓ Approuvée' : '✕ Refusée'}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ============================================
+                  TAB: EQUIPE
+                  ============================================ */}
+              {activeTab === 'equipe' && (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                    <h2 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>
+                      Équipe ({employees.length} membres)
+                    </h2>
+                    <button className="btn btn-primary">
+                      + Ajouter un membre
+                    </button>
+                  </div>
+
+                  <div className="equipe-grid">
+                    {employees.map((emp) => {
+                      const roleClass = emp.role.toLowerCase().replace('é', 'e');
+                      return (
+                        <div key={emp.id} className="employee-card">
+                          <div className="employee-card-header">
+                            <div className={`employee-card-avatar ${roleClass}`}>
+                              {emp.prenom[0]}{emp.nom?.[0]}
+                            </div>
+                            <div className="employee-card-info">
+                              <h4>{emp.prenom} {emp.nom}</h4>
+                              <p>
+                                <span className={`employee-role-badge ${roleClass}`}>
+                                  {emp.role}
+                                </span>
+                              </p>
+                            </div>
+                          </div>
+                          <div className="employee-card-contact">
+                            {emp.email && <span>📧 {emp.email}</span>}
+                            {emp.telephone && <span>📱 {emp.telephone}</span>}
+                          </div>
+                          <div className="employee-card-actions">
+                            <button className="btn btn-secondary btn-sm" style={{ flex: 1 }}>
+                              ✏️ Modifier
+                            </button>
+                            <button
+                              className="btn btn-danger btn-sm"
+                              onClick={() => {
+                                if (confirm('Supprimer cet employé ?')) {
+                                  deleteEmployee(emp.id);
+                                }
+                              }}
+                            >
+                              🗑️
+                            </button>
                           </div>
                         </div>
-                      </td>
-                      {(e.dispos || ["?","?","?","?","?","?"]).map((slot, i) => (
-                        <td key={i}><span className={`dispo-badge ${slot === "?" ? "pending" : slot === "-" ? "unavailable" : "available"}`}>{slot}</span></td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-        </div>
+        </main>
 
-        {/* VUE DEMANDES */}
-        <div className={`view ${onglet === "demandes" ? "active" : ""}`}>
-          <div className="page-header"><div><h2 className="page-title">📋 Demandes à traiter</h2><p className="page-subtitle">{demandes.length} demande(s) en attente</p></div></div>
-          
-          {demandes.length === 0 ? (
-            <div className="card"><div className="empty-state">🎉 Aucune demande en attente</div></div>
-          ) : (
-            demandes.map(dem => (
-              <div key={dem.id} className="demande-card">
-                <div className={`demande-header ${dem.urgent ? "urgent" : ""}`}>
-                  <div className="demande-employee">
-                    <div className={`demande-avatar ${dem.type === "conge" ? "avatar-blue" : dem.type === "echange" ? "avatar-green" : "avatar-orange"}`}>
-                      {dem.employees?.prenom?.substring(0,2).toUpperCase()}
-                    </div>
-                    <div>
-                      <div className="demande-name">{dem.employees?.prenom} {dem.employees?.nom}</div>
-                      <div className="demande-role">{dem.employees?.role}</div>
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center" }}>
-                    <span className={`demande-type type-${dem.type}`}>
-                      {dem.type === "conge" && "🏖️ Congé"}
-                      {dem.type === "echange" && "🔄 Échange"}
-                      {dem.type === "maladie" && "🏥 Maladie"}
-                      {dem.type === "autre" && "📋 Autre"}
-                    </span>
-                    {dem.urgent && <span className="urgent-badge">URGENT</span>}
-                  </div>
-                </div>
-                <div className="demande-body">
-                  <div className="demande-info-grid">
-                    <div className="demande-info"><div className="demande-info-label">📅 Date</div><div className="demande-info-value">{new Date(dem.date_debut).toLocaleDateString('fr-FR')}</div></div>
-                    <div className="demande-info"><div className="demande-info-label">🕐 Créneau</div><div className="demande-info-value">{dem.creneau}</div></div>
-                    <div className="demande-info"><div className="demande-info-label">📆 Demandé</div><div className="demande-info-value">{dem.created_at ? new Date(dem.created_at).toLocaleDateString('fr-FR') : '-'}</div></div>
-                  </div>
-                  {dem.motif && <div className="demande-motif"><div className="demande-info-label">💬 Motif</div><div className="demande-motif-text">"{dem.motif}"</div></div>}
-                  <div className="demande-actions">
-                    <button className="btn btn-success" onClick={() => updateDemandeStatus(dem.id, 'approuve')}>✓ Approuver</button>
-                    <button className="btn btn-secondary" onClick={() => updateDemandeStatus(dem.id, 'refuse')}>✗ Refuser</button>
-                  </div>
-                </div>
+        {/* Drag overlay */}
+        <DragOverlay>
+          {draggedEmployee && (
+            <div className="employee-draggable" style={{ opacity: 0.9, boxShadow: 'var(--shadow-lg)' }}>
+              <div className={`employee-avatar ${draggedEmployee.role.toLowerCase().replace('é', 'e')}`}>
+                {draggedEmployee.prenom[0]}{draggedEmployee.nom?.[0]}
               </div>
-            ))
+              <div className="employee-info">
+                <div className="name">{draggedEmployee.prenom} {draggedEmployee.nom?.[0]}.</div>
+              </div>
+            </div>
           )}
-        </div>
+        </DragOverlay>
 
-        {/* VUE PLANNING */}
-        <div className={`view ${onglet === "planning" ? "active" : ""}`}>
-          <div className="page-header">
-            <div><h2 className="page-title">📅 Créer le planning</h2><p className="page-subtitle">Semaine du {new Date(semaineDebut).toLocaleDateString('fr-FR')}</p></div>
-            <button className="btn btn-success btn-lg" onClick={() => showToast("Planning publié !")}>✓ Valider et publier</button>
+        {/* Toast */}
+        {toast && (
+          <div className={`toast ${toast.type}`}>
+            {toast.message}
           </div>
-
-          <div className="day-selector">
-            {jours.map((jour, i) => {
-              const dayP = planning.filter(p => p.date === getDateForDay(i));
-              const pharmCount = dayP.filter(p => p.employees?.role === "Pharmacien").length;
-              return (
-                <button key={i} className={`day-btn ${selectedDay === i ? "active" : ""}`} onClick={() => setSelectedDay(i)}>
-                  <div className="day-name">{jour.nom}</div>
-                  <div className="day-date">{getDateLabel(i)}</div>
-                  <span className={`day-count ${pharmCount >= 2 ? "ok" : "warning"}`}>{pharmCount >= 2 ? `✓ ${dayP.length}` : `⚠️ ${pharmCount}`}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="planning-container">
-            <div className="planning-section">
-              <div className="planning-section-header matin">
-                <div className="section-left">
-                  <div className="section-icon matin">🌅</div>
-                  <div><div className="section-title">MATIN</div><div className="section-hours">8h30 - 14h00</div></div>
-                </div>
-                <span className={`section-status ${countPharmaciensMatin >= 2 ? "ok" : "warning"}`}>{countPharmaciensMatin} pharmacien(s)</span>
-              </div>
-              <div className="timeline-container">
-                {planningMatin.map(p => (
-                  <div key={p.id} className="planning-item">
-                    <div className={`planning-item-avatar ${getAvatarClass(p.employees?.role || '')}`}>{getInitiales(p.employees?.prenom || '', p.employees?.nom || '')}</div>
-                    <div className="planning-item-info"><div className="planning-item-name">{p.employees?.prenom} {p.employees?.nom}</div><div className="planning-item-role">{p.employees?.role}</div></div>
-                    <div className="planning-item-hours">
-                      <select value={p.debut} onChange={(e) => updatePlanningHours(p.id, 'debut', e.target.value)}>{heures.map(h => <option key={h} value={h}>{formatHeure(h)}</option>)}</select>
-                      <span style={{ color: "#94a3b8" }}>→</span>
-                      <select value={p.fin} onChange={(e) => updatePlanningHours(p.id, 'fin', e.target.value)}>{heures.map(h => <option key={h} value={h}>{formatHeure(h)}</option>)}</select>
-                    </div>
-                    <div className="planning-item-duration">{calculerDuree(p.debut, p.fin)}</div>
-                    <button className="planning-item-remove" onClick={() => removeFromPlanning(p.id)}>✕</button>
-                  </div>
-                ))}
-                <button className="add-employee-btn" onClick={() => { setPlanningForm({ employeeId: 0, debut: "08:30", fin: "14:00" }); setShowAddToPlanning(true); }}>➕ Ajouter matin</button>
-              </div>
-            </div>
-
-            <div className="planning-section">
-              <div className="planning-section-header aprem">
-                <div className="section-left">
-                  <div className="section-icon aprem">🌆</div>
-                  <div><div className="section-title">APRÈS-MIDI</div><div className="section-hours">14h00 - 20h30</div></div>
-                </div>
-                <span className={`section-status ${countPharmacienAprem >= 2 ? "ok" : "warning"}`}>{countPharmacienAprem} pharmacien(s)</span>
-              </div>
-              <div className="timeline-container">
-                {planningAprem.map(p => (
-                  <div key={p.id} className="planning-item">
-                    <div className={`planning-item-avatar ${getAvatarClass(p.employees?.role || '')}`}>{getInitiales(p.employees?.prenom || '', p.employees?.nom || '')}</div>
-                    <div className="planning-item-info"><div className="planning-item-name">{p.employees?.prenom} {p.employees?.nom}</div><div className="planning-item-role">{p.employees?.role}</div></div>
-                    <div className="planning-item-hours">
-                      <select value={p.debut} onChange={(e) => updatePlanningHours(p.id, 'debut', e.target.value)}>{heures.map(h => <option key={h} value={h}>{formatHeure(h)}</option>)}</select>
-                      <span style={{ color: "#94a3b8" }}>→</span>
-                      <select value={p.fin} onChange={(e) => updatePlanningHours(p.id, 'fin', e.target.value)}>{heures.map(h => <option key={h} value={h}>{formatHeure(h)}</option>)}</select>
-                    </div>
-                    <div className="planning-item-duration">{calculerDuree(p.debut, p.fin)}</div>
-                    <button className="planning-item-remove" onClick={() => removeFromPlanning(p.id)}>✕</button>
-                  </div>
-                ))}
-                <button className="add-employee-btn" onClick={() => { setPlanningForm({ employeeId: 0, debut: "14:00", fin: "20:30" }); setShowAddToPlanning(true); }}>➕ Ajouter après-midi</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* VUE ÉQUIPE */}
-        <div className={`view ${onglet === "equipe" ? "active" : ""}`}>
-          <div className="page-header">
-            <div><h2 className="page-title">👥 Gestion de l'équipe</h2><p className="page-subtitle">{employees.length} membres</p></div>
-            <button className="btn btn-success btn-lg" onClick={openAddModal}>➕ Ajouter</button>
-          </div>
-
-          {[
-            { title: "💊 Pharmaciens", data: pharmaciens, bg: "linear-gradient(135deg,#ecfdf5,#d1fae5)" },
-            { title: "💉 Préparateurs", data: preparateurs, bg: "linear-gradient(135deg,#dbeafe,#bfdbfe)" },
-            { title: "📚 Apprentis", data: apprentis, bg: "linear-gradient(135deg,#ede9fe,#ddd6fe)" },
-            { title: "🎓 Étudiants", data: etudiants, bg: "linear-gradient(135deg,#fff7ed,#fed7aa)" },
-          ].map(section => (
-            <div key={section.title} className="card">
-              <div className="equipe-section-header" style={{ background: section.bg }}>
-                <div className="equipe-section-title">{section.title} <span className="equipe-count">{section.data.length}</span></div>
-              </div>
-              <div className="equipe-grid">
-                {section.data.map(e => (
-                  <div key={e.id} className="equipe-card">
-                    <div className={`equipe-card-avatar ${getAvatarClass(e.role)}`}>{getInitiales(e.prenom, e.nom)}</div>
-                    <div className="equipe-card-info">
-                      <div className="equipe-card-name">{e.nom ? `${e.prenom} ${e.nom}` : e.prenom}</div>
-                      <div className="equipe-card-role">{e.role}</div>
-                      {e.email && <div className="equipe-card-email">📧 {e.email}</div>}
-                    </div>
-                    <div className="equipe-card-actions">
-                      <button className="equipe-card-btn edit" onClick={() => openEditModal(e)}>✏️</button>
-                      <button className="equipe-card-btn delete" onClick={() => openDeleteModal(e)}>🗑️</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </main>
-
-      {/* MODALS */}
-      <div className={`modal-overlay ${showModal === "add" ? "active" : ""}`} onClick={() => setShowModal(null)}>
-        <div className="modal" onClick={e => e.stopPropagation()}>
-          <div className="modal-header"><div className="modal-title">➕ Ajouter</div><button className="modal-close" onClick={() => setShowModal(null)}>✕</button></div>
-          <div className="modal-body">
-            <div className="form-group"><label className="form-label">Prénom *</label><input className="form-input" value={formData.prenom} onChange={e => setFormData({...formData, prenom: e.target.value})} /></div>
-            <div className="form-group"><label className="form-label">Nom</label><input className="form-input" value={formData.nom} onChange={e => setFormData({...formData, nom: e.target.value})} /></div>
-            <div className="form-group"><label className="form-label">Email *</label><input className="form-input" type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} /></div>
-            <div className="form-group"><label className="form-label">Téléphone</label><input className="form-input" value={formData.tel} onChange={e => setFormData({...formData, tel: e.target.value})} /></div>
-            <div className="form-group">
-              <label className="form-label">Fonction</label>
-              <div className="role-selector">
-                {[{ id: "Pharmacien", icon: "💊" }, { id: "Preparateur", icon: "💉" }, { id: "Apprenti", icon: "📚" }, { id: "Etudiant", icon: "🎓" }].map(r => (
-                  <div key={r.id} className={`role-option ${selectedRole === r.id ? "selected" : ""}`} onClick={() => setSelectedRole(r.id)}>
-                    <div className="role-icon">{r.icon}</div><div className="role-name">{r.id}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div className="modal-footer"><button className="btn btn-secondary" onClick={() => setShowModal(null)}>Annuler</button><button className="btn btn-success" onClick={addEmployee}>✓ Ajouter</button></div>
-        </div>
+        )}
       </div>
-
-      <div className={`modal-overlay ${showModal === "edit" ? "active" : ""}`} onClick={() => setShowModal(null)}>
-        <div className="modal" onClick={e => e.stopPropagation()}>
-          <div className="modal-header"><div className="modal-title">✏️ Modifier</div><button className="modal-close" onClick={() => setShowModal(null)}>✕</button></div>
-          <div className="modal-body">
-            <div className="form-group"><label className="form-label">Prénom *</label><input className="form-input" value={formData.prenom} onChange={e => setFormData({...formData, prenom: e.target.value})} /></div>
-            <div className="form-group"><label className="form-label">Nom</label><input className="form-input" value={formData.nom} onChange={e => setFormData({...formData, nom: e.target.value})} /></div>
-            <div className="form-group"><label className="form-label">Email</label><input className="form-input" type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} /></div>
-            <div className="form-group"><label className="form-label">Téléphone</label><input className="form-input" value={formData.tel} onChange={e => setFormData({...formData, tel: e.target.value})} /></div>
-            <div className="form-group">
-              <label className="form-label">Fonction</label>
-              <div className="role-selector">
-                {[{ id: "Pharmacien", icon: "💊" }, { id: "Preparateur", icon: "💉" }, { id: "Apprenti", icon: "📚" }, { id: "Etudiant", icon: "🎓" }].map(r => (
-                  <div key={r.id} className={`role-option ${selectedRole === r.id ? "selected" : ""}`} onClick={() => setSelectedRole(r.id)}>
-                    <div className="role-icon">{r.icon}</div><div className="role-name">{r.id}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div className="modal-footer"><button className="btn btn-secondary" onClick={() => setShowModal(null)}>Annuler</button><button className="btn btn-primary" onClick={saveEmployee}>💾 Enregistrer</button></div>
-        </div>
-      </div>
-
-      <div className={`modal-overlay ${showModal === "delete" ? "active" : ""}`} onClick={() => setShowModal(null)}>
-        <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
-          <div className="modal-header"><div className="modal-title">🗑️ Supprimer</div><button className="modal-close" onClick={() => setShowModal(null)}>✕</button></div>
-          <div className="modal-body">
-            <div className="confirm-text">Supprimer <span className="confirm-name">{deleteData?.prenom} {deleteData?.nom}</span> ?</div>
-            <div className="confirm-warning">⚠️ Action irréversible</div>
-          </div>
-          <div className="modal-footer"><button className="btn btn-secondary" onClick={() => setShowModal(null)}>Annuler</button><button className="btn btn-danger" onClick={confirmDelete}>🗑️ Supprimer</button></div>
-        </div>
-      </div>
-
-      <div className={`modal-overlay ${showAddToPlanning ? "active" : ""}`} onClick={() => setShowAddToPlanning(false)}>
-        <div className="modal" onClick={e => e.stopPropagation()}>
-          <div className="modal-header"><div className="modal-title">➕ Ajouter au planning</div><button className="modal-close" onClick={() => setShowAddToPlanning(false)}>✕</button></div>
-          <div className="modal-body">
-            <div className="form-group">
-              <label className="form-label">Employé</label>
-              <select className="form-select" value={planningForm.employeeId} onChange={e => setPlanningForm({...planningForm, employeeId: Number(e.target.value)})}>
-                <option value={0}>-- Sélectionner --</option>
-                {employeesNotInPlanning.map(e => <option key={e.id} value={e.id}>{e.prenom} {e.nom} ({e.role})</option>)}
-              </select>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Horaires</label>
-              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                <select className="form-select" style={{ flex: 1 }} value={planningForm.debut} onChange={e => setPlanningForm({...planningForm, debut: e.target.value})}>
-                  {heures.map(h => <option key={h} value={h}>{formatHeure(h)}</option>)}
-                </select>
-                <span style={{ color: "#94a3b8" }}>→</span>
-                <select className="form-select" style={{ flex: 1 }} value={planningForm.fin} onChange={e => setPlanningForm({...planningForm, fin: e.target.value})}>
-                  {heures.map(h => <option key={h} value={h}>{formatHeure(h)}</option>)}
-                </select>
-              </div>
-            </div>
-          </div>
-          <div className="modal-footer"><button className="btn btn-secondary" onClick={() => setShowAddToPlanning(false)}>Annuler</button><button className="btn btn-success" onClick={addToPlanning}>✓ Ajouter</button></div>
-        </div>
-      </div>
-
-      <div className={`toast ${toast.type} ${toast.visible ? "active" : ""}`}>
-        <span>{toast.type === "success" ? "✓" : "✗"}</span>
-        <span>{toast.message}</span>
-      </div>
-    </div>
+    </DndContext>
   );
 }
