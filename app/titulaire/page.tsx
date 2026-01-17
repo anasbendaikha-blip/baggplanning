@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import type { Employee, Disponibilite, Planning, Demande } from '@/types/database';
+import { sendDemandeApprovedEmail, sendDemandeRefusedEmail } from '@/lib/use-email';
 
 export default function TitulairePage() {
   const router = useRouter();
@@ -194,7 +195,8 @@ export default function TitulairePage() {
         prenom: formData.prenom, 
         nom: formData.nom, 
         email: formData.email, 
-        tel: formData.tel, 
+        tel: formData.tel,
+        initial : formData.nom, 
         role: selectedRole 
       }]);
 
@@ -309,19 +311,38 @@ export default function TitulairePage() {
   };
 
   // Demandes
-  const updateDemandeStatus = async (demandeId: number, status: 'approuve' | 'refuse') => {
-    const { error } = await supabase
-      .from('demandes')
-      .update({ status })
-      .eq('id', demandeId);
+const updateDemandeStatus = async (demandeId: number, status: 'approuve' | 'refuse') => {
+  const demande = demandes.find(d => d.id === demandeId);
+  
+  const { error } = await supabase
+    .from('demandes')
+    .update({ status })
+    .eq('id', demandeId);
 
-    if (error) {
-      showToast("Erreur: " + error.message, "error");
+  if (!error && demande?.employees?.email) {
+    // Envoyer l'email de notification
+    if (status === 'approuve') {
+      await sendDemandeApprovedEmail(
+        demande.employees.email,
+        demande.employees.prenom,
+        demande.type,
+        new Date(demande.date_debut).toLocaleDateString('fr-FR'),
+        demande.creneau
+      );
     } else {
-      showToast(status === 'approuve' ? "Demande approuvée !" : "Demande refusée");
-      loadDemandes();
+      await sendDemandeRefusedEmail(
+        demande.employees.email,
+        demande.employees.prenom,
+        demande.type,
+        new Date(demande.date_debut).toLocaleDateString('fr-FR')
+      );
     }
-  };
+    
+    showToast(status === 'approuve' ? "Demande approuvée ! Email envoyé" : "Demande refusée");
+  }
+  
+  loadDemandes();
+};
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
