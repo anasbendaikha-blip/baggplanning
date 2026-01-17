@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { supabase } from './supabase';
+import { supabase } from '@/lib/supabase';
 import { Planning } from '@/types/database';
 
 // Hook pour récupérer le planning d'une période

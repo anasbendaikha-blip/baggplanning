@@ -1,6 +1,6 @@
 // Types pour la base de données Supabase BaggPlanning
 
-export type Role = 'Pharmacien' | 'Preparateur' | 'Apprenti' | 'Etudiant';
+export type Role = 'Pharmacien' | 'Preparateur' | 'Apprenti' | 'Etudiant' | 'Conditionneur';
 export type UserType = 'titulaire' | 'employe';
 export type DemandeType = 'conge' | 'echange' | 'maladie' | 'autre';
 export type DemandeStatus = 'en_attente' | 'approuve' | 'refuse';

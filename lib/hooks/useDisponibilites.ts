@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { supabase } from './supabase';
+import { supabase } from '@/lib/supabase';
 import { Disponibilite } from '@/types/database';
 
 // Hook pour récupérer les disponibilités d'une semaine

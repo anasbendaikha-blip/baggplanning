@@ -1,4 +1,4 @@
-import { AuthProvider } from '../lib/auth-context';
+import { AuthProvider } from '@/lib/auth-context';
 
 export default function RootLayout({children,}: {children: React.ReactNode;}) 
 {
