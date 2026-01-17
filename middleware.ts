@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-export async function middleware(request: NextRequest) {
-  let response = NextResponse.next();
+export async function middleware(req: NextRequest) {
+  const res = NextResponse.next();
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -10,11 +10,11 @@ export async function middleware(request: NextRequest) {
     {
       cookies: {
         getAll() {
-          return request.cookies.getAll();
+          return req.cookies.getAll();
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options);
+            res.cookies.set(name, value, options);
           });
         },
       },
@@ -22,41 +22,75 @@ export async function middleware(request: NextRequest) {
   );
 
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+  } = await supabase.auth.getSession();
 
-  const pathname = request.nextUrl.pathname;
+  const pathname = req.nextUrl.pathname;
 
+  // Routes publiques
   const publicRoutes = ["/auth/login", "/auth/register", "/auth/forgot-password"];
-  const isPublicRoute = publicRoutes.some((r) => pathname.startsWith(r));
-  const isProtectedRoute = pathname.startsWith("/titulaire") || pathname.startsWith("/employe");
+  const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
 
-  // pas connecté + route protégée => login
-  if (!user && isProtectedRoute) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/auth/login";
-    url.searchParams.set("redirect", pathname);
-    return NextResponse.redirect(url);
+  // Routes protégées
+  const isProtectedRoute =
+    pathname.startsWith("/titulaire") || pathname.startsWith("/employe");
+
+  // Pas connecté + route protégée => login
+  if (!session && isProtectedRoute) {
+    const loginUrl = req.nextUrl.clone();
+    loginUrl.pathname = "/auth/login";
+    loginUrl.searchParams.set("redirect", pathname);
+    return NextResponse.redirect(loginUrl);
   }
 
-  // connecté + sur /auth/login => redirect selon rôle
-  if (user && pathname === "/auth/login") {
+  // Connecté + sur /auth/login => rediriger selon rôle
+  if (session && pathname.startsWith("/auth/login")) {
     const { data: userData } = await supabase
       .from("users")
       .select("user_type")
-      .eq("id", user.id)
+      .eq("id", session.user.id)
       .single();
 
-    const target = userData?.user_type === "titulaire" ? "/titulaire" : "/employe";
-    const url = request.nextUrl.clone();
-    url.pathname = target;
-    url.search = "";
-    return NextResponse.redirect(url);
+    const userType = userData?.user_type;
+    const redirectUrl = userType === "titulaire" ? "/titulaire" : "/employe";
+    return NextResponse.redirect(new URL(redirectUrl, req.url));
   }
 
-  return response;
+  // Si route protégée, vérif du rôle
+  if (session && isProtectedRoute) {
+    const { data: userData } = await supabase
+      .from("users")
+      .select("user_type")
+      .eq("id", session.user.id)
+      .single();
+
+    const userType = userData?.user_type;
+
+    if (pathname.startsWith("/titulaire") && userType !== "titulaire") {
+      return NextResponse.redirect(new URL("/employe", req.url));
+    }
+  }
+
+  // Racine => redirect
+  if (pathname === "/") {
+    if (!session) return NextResponse.redirect(new URL("/auth/login", req.url));
+
+    const { data: userData } = await supabase
+      .from("users")
+      .select("user_type")
+      .eq("id", session.user.id)
+      .single();
+
+    const userType = userData?.user_type;
+    const redirectUrl = userType === "titulaire" ? "/titulaire" : "/employe";
+    return NextResponse.redirect(new URL(redirectUrl, req.url));
+  }
+
+  return res;
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|icons|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|icons|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 };

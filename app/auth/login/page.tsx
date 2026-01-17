@@ -1,72 +1,101 @@
 "use client";
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const searchParams = useSearchParams();
+
+  const redirectParam = useMemo(() => {
+    const r = searchParams.get("redirect");
+    // sécurité minimale : on accepte seulement une route interne
+    if (r && r.startsWith("/")) return r;
+    return null;
+  }, [searchParams]);
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-
-    try {
-      // 1. Connexion avec Supabase Auth
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (authError) {
-        setError(authError.message);
-        setLoading(false);
-        return;
+  // Si déjà connecté, laisse le middleware gérer / rediriger,
+  // mais on évite l’écran bloqué si l’utilisateur revient sur /auth/login
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      if (cancelled) return;
+      if (data.session) {
+        // on force un refresh simple côté app, et le middleware fera la redirection
+        router.replace("/auth/login");
       }
-
-      if (!authData.user) {
-        setError('Erreur de connexion');
-        setLoading(false);
-        return;
-      }
-
-      // 2. Récupérer le type d'utilisateur
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('user_type')
-        .eq('id', authData.user.id)
-        .single();
-
-      if (userError || !userData) {
-        // Si pas dans la table users, rediriger vers employe par défaut
-        console.log('User not found in users table, redirecting to employe');
-        router.push('/employe');
-        return;
-      }
-
-      // 3. Rediriger selon le type
-      if (userData.user_type === 'titulaire') {
-        router.push('/titulaire');
-      } else {
-        router.push('/employe');
-      }
-
-    } catch (err) {
-      console.error('Login error:', err);
-      setError('Une erreur est survenue');
-      setLoading(false);
-    }
-  };
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const fillDemo = (demoEmail: string, demoPassword: string) => {
     setEmail(demoEmail);
     setPassword(demoPassword);
-    setError('');
+    setError("");
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loading) return;
+
+    setLoading(true);
+    setError("");
+
+    try {
+      // 1) Auth
+      const { data: authData, error: authError } =
+        await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
+
+      if (authError) {
+        setError(authError.message);
+        return;
+      }
+
+      const session = authData.session;
+      if (!session?.user?.id) {
+        setError("Session introuvable après connexion. Réessaie.");
+        return;
+      }
+
+      // 2) user_type
+      const { data: userData, error: userError } = await supabase
+        .from("users")
+        .select("user_type")
+        .eq("id", session.user.id)
+        .single();
+
+      if (userError || !userData?.user_type) {
+        // fallback (évite blocage)
+        const fallback = "/employe";
+        router.replace(redirectParam ?? fallback);
+        return;
+      }
+
+      const fallback =
+        userData.user_type === "titulaire" ? "/titulaire" : "/employe";
+
+      // Si redirectParam existe, on l’utilise, sinon on applique la redirection par rôle
+      router.replace(redirectParam ?? fallback);
+    } catch (err: any) {
+      console.error("Login error:", err);
+      setError(err?.message ?? "Une erreur est survenue");
+    } finally {
+      // IMPORTANT : ne jamais rester bloqué sur "Connexion en cours..."
+      setLoading(false);
+    }
   };
 
   const styles = `
@@ -100,6 +129,8 @@ export default function LoginPage() {
     .demo-btn { padding: 8px 16px; background: #10b981; border: none; border-radius: 8px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.2s; }
     .demo-btn:hover { background: #059669; }
     .info-box { background: #eff6ff; border-radius: 10px; padding: 12px 16px; margin-top: 16px; font-size: 12px; color: #1e40af; }
+    .small { color: #64748b; font-size: 12px; margin-top: 12px; text-align: center; }
+    .chip { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; background:#f1f5f9; color:#334155; font-size:12px; }
   `;
 
   return (
@@ -111,6 +142,11 @@ export default function LoginPage() {
             <div className="logo">📅</div>
             <h1 className="title">BaggPlanning</h1>
             <p className="subtitle">Gestion des plannings de la pharmacie</p>
+            {redirectParam && (
+              <div style={{ marginTop: 12 }}>
+                <span className="chip">↪️ Redirection demandée : {redirectParam}</span>
+              </div>
+            )}
           </div>
 
           <div className="login-card">
@@ -123,32 +159,47 @@ export default function LoginPage() {
               )}
 
               <div className="form-group">
-                <label className="form-label">Email</label>
+                <label className="form-label" htmlFor="email">
+                  Email
+                </label>
                 <input
+                  id="email"
+                  name="email"
                   type="email"
                   className="form-input"
                   placeholder="votre@email.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
                   required
                 />
               </div>
 
               <div className="form-group">
-                <label className="form-label">Mot de passe</label>
+                <label className="form-label" htmlFor="password">
+                  Mot de passe
+                </label>
                 <input
+                  id="password"
+                  name="password"
                   type="password"
                   className="form-input"
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
                   required
                 />
               </div>
 
               <button type="submit" className="submit-btn" disabled={loading}>
-                {loading ? '⏳ Connexion en cours...' : '🔐 Se connecter'}
+                {loading ? "⏳ Connexion en cours..." : "🔐 Se connecter"}
               </button>
+
+              <div className="small">
+                Si tu restes bloqué ici, c’est souvent un problème de redirection
+                (middleware / rôle). Ce code évite le blocage côté UI.
+              </div>
             </form>
 
             <div className="divider">
@@ -159,28 +210,40 @@ export default function LoginPage() {
 
             <div className="demo-accounts">
               <div className="demo-title">Tester l'application</div>
+
               <div className="demo-account">
                 <div>
                   <div className="demo-role">👩‍💼 Titulaire</div>
                   <div className="demo-email">titulaire@pharmacie.fr</div>
                 </div>
-                <button className="demo-btn" type="button" onClick={() => fillDemo('titulaire@pharmacie.fr', 'demo123')}>
+                <button
+                  className="demo-btn"
+                  type="button"
+                  onClick={() => fillDemo("titulaire@pharmacie.fr", "demo123")}
+                >
                   Utiliser
                 </button>
               </div>
+
               <div className="demo-account">
                 <div>
                   <div className="demo-role">🎓 Étudiant</div>
                   <div className="demo-email">anas@email.com</div>
                 </div>
-                <button className="demo-btn" type="button" onClick={() => fillDemo('anas@email.com', 'demo123')}>
+                <button
+                  className="demo-btn"
+                  type="button"
+                  onClick={() => fillDemo("anas@email.com", "demo123")}
+                >
                   Utiliser
                 </button>
               </div>
             </div>
 
             <div className="info-box">
-              💡 <strong>Astuce :</strong> Cliquez sur "Utiliser" pour remplir automatiquement les identifiants de démo, puis cliquez sur "Se connecter".
+              💡 <strong>Astuce :</strong> Clique sur “Utiliser” pour remplir
+              automatiquement les identifiants de démo, puis clique sur “Se
+              connecter”.
             </div>
           </div>
         </div>
