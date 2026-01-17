@@ -1,101 +1,73 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-export default function LoginPage() {
+export default function LoginClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const redirectParam = useMemo(() => {
+  const redirectTo = useMemo(() => {
     const r = searchParams.get("redirect");
-    // sécurité minimale : on accepte seulement une route interne
+    // sécurité basique: on accepte uniquement les paths internes
     if (r && r.startsWith("/")) return r;
     return null;
   }, [searchParams]);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Si déjà connecté, laisse le middleware gérer / rediriger,
-  // mais on évite l’écran bloqué si l’utilisateur revient sur /auth/login
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { data } = await supabase.auth.getSession();
-      if (cancelled) return;
-      if (data.session) {
-        // on force un refresh simple côté app, et le middleware fera la redirection
-        router.replace("/auth/login");
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    try {
+      const { data: authData, error: authError } =
+        await supabase.auth.signInWithPassword({ email, password });
+
+      if (authError) {
+        setError(authError.message);
+        setLoading(false);
+        return;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [router]);
+
+      if (!authData.user) {
+        setError("Erreur de connexion");
+        setLoading(false);
+        return;
+      }
+
+      // ✅ Si redirect est fourni, on le respecte en priorité
+      if (redirectTo) {
+        router.push(redirectTo);
+        return;
+      }
+
+      // Sinon redirection selon user_type
+      const { data: userData } = await supabase
+        .from("users")
+        .select("user_type")
+        .eq("id", authData.user.id)
+        .single();
+
+      const target = userData?.user_type === "titulaire" ? "/titulaire" : "/employe";
+      router.push(target);
+    } catch (err) {
+      console.error("Login error:", err);
+      setError("Une erreur est survenue");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const fillDemo = (demoEmail: string, demoPassword: string) => {
     setEmail(demoEmail);
     setPassword(demoPassword);
     setError("");
-  };
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (loading) return;
-
-    setLoading(true);
-    setError("");
-
-    try {
-      // 1) Auth
-      const { data: authData, error: authError } =
-        await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
-        });
-
-      if (authError) {
-        setError(authError.message);
-        return;
-      }
-
-      const session = authData.session;
-      if (!session?.user?.id) {
-        setError("Session introuvable après connexion. Réessaie.");
-        return;
-      }
-
-      // 2) user_type
-      const { data: userData, error: userError } = await supabase
-        .from("users")
-        .select("user_type")
-        .eq("id", session.user.id)
-        .single();
-
-      if (userError || !userData?.user_type) {
-        // fallback (évite blocage)
-        const fallback = "/employe";
-        router.replace(redirectParam ?? fallback);
-        return;
-      }
-
-      const fallback =
-        userData.user_type === "titulaire" ? "/titulaire" : "/employe";
-
-      // Si redirectParam existe, on l’utilise, sinon on applique la redirection par rôle
-      router.replace(redirectParam ?? fallback);
-    } catch (err: any) {
-      console.error("Login error:", err);
-      setError(err?.message ?? "Une erreur est survenue");
-    } finally {
-      // IMPORTANT : ne jamais rester bloqué sur "Connexion en cours..."
-      setLoading(false);
-    }
   };
 
   const styles = `
@@ -112,10 +84,8 @@ export default function LoginPage() {
     .form-label { display: block; font-weight: 600; color: #334155; font-size: 14px; margin-bottom: 8px; }
     .form-input { width: 100%; padding: 14px 16px; background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 15px; font-family: inherit; color: #1e293b; transition: all 0.2s; }
     .form-input:focus { outline: none; border-color: #10b981; background: white; box-shadow: 0 0 0 3px rgba(16,185,129,0.1); }
-    .form-input::placeholder { color: #94a3b8; }
     .error-message { background: #fee2e2; color: #b91c1c; padding: 12px 16px; border-radius: 10px; font-size: 13px; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
     .submit-btn { width: 100%; padding: 16px; background: linear-gradient(135deg, #10b981, #059669); border: none; border-radius: 12px; color: white; font-size: 16px; font-weight: 700; cursor: pointer; font-family: inherit; transition: all 0.2s; box-shadow: 0 4px 16px rgba(16,185,129,0.3); }
-    .submit-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(16,185,129,0.4); }
     .submit-btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
     .divider { display: flex; align-items: center; margin: 24px 0; gap: 16px; }
     .divider-line { flex: 1; height: 1px; background: #e2e8f0; }
@@ -127,10 +97,7 @@ export default function LoginPage() {
     .demo-role { font-weight: 600; color: #334155; font-size: 14px; }
     .demo-email { color: #64748b; font-size: 12px; }
     .demo-btn { padding: 8px 16px; background: #10b981; border: none; border-radius: 8px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.2s; }
-    .demo-btn:hover { background: #059669; }
     .info-box { background: #eff6ff; border-radius: 10px; padding: 12px 16px; margin-top: 16px; font-size: 12px; color: #1e40af; }
-    .small { color: #64748b; font-size: 12px; margin-top: 12px; text-align: center; }
-    .chip { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; background:#f1f5f9; color:#334155; font-size:12px; }
   `;
 
   return (
@@ -142,11 +109,6 @@ export default function LoginPage() {
             <div className="logo">📅</div>
             <h1 className="title">BaggPlanning</h1>
             <p className="subtitle">Gestion des plannings de la pharmacie</p>
-            {redirectParam && (
-              <div style={{ marginTop: 12 }}>
-                <span className="chip">↪️ Redirection demandée : {redirectParam}</span>
-              </div>
-            )}
           </div>
 
           <div className="login-card">
@@ -159,9 +121,7 @@ export default function LoginPage() {
               )}
 
               <div className="form-group">
-                <label className="form-label" htmlFor="email">
-                  Email
-                </label>
+                <label className="form-label" htmlFor="email">Email</label>
                 <input
                   id="email"
                   name="email"
@@ -170,15 +130,13 @@ export default function LoginPage() {
                   placeholder="votre@email.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="email"
                   required
+                  autoComplete="email"
                 />
               </div>
 
               <div className="form-group">
-                <label className="form-label" htmlFor="password">
-                  Mot de passe
-                </label>
+                <label className="form-label" htmlFor="password">Mot de passe</label>
                 <input
                   id="password"
                   name="password"
@@ -187,25 +145,20 @@ export default function LoginPage() {
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
                   required
+                  autoComplete="current-password"
                 />
               </div>
 
               <button type="submit" className="submit-btn" disabled={loading}>
                 {loading ? "⏳ Connexion en cours..." : "🔐 Se connecter"}
               </button>
-
-              <div className="small">
-                Si tu restes bloqué ici, c’est souvent un problème de redirection
-                (middleware / rôle). Ce code évite le blocage côté UI.
-              </div>
             </form>
 
             <div className="divider">
-              <div className="divider-line"></div>
+              <div className="divider-line" />
               <span className="divider-text">COMPTES DÉMO</span>
-              <div className="divider-line"></div>
+              <div className="divider-line" />
             </div>
 
             <div className="demo-accounts">
@@ -241,9 +194,7 @@ export default function LoginPage() {
             </div>
 
             <div className="info-box">
-              💡 <strong>Astuce :</strong> Clique sur “Utiliser” pour remplir
-              automatiquement les identifiants de démo, puis clique sur “Se
-              connecter”.
+              💡 <strong>Astuce :</strong> Clique sur “Utiliser” puis “Se connecter”.
             </div>
           </div>
         </div>
