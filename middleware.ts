@@ -1,19 +1,45 @@
-import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs';
+import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export async function middleware(request: NextRequest) {
-  const res = NextResponse.next();
-  const supabase = createMiddlewareClient({ req: request, res });
+  let response = NextResponse.next({
+    request: {
+      headers: request.headers,
+    },
+  });
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            request.cookies.set(name, value);
+          });
+          response = NextResponse.next({
+            request: {
+              headers: request.headers,
+            },
+          });
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
+          });
+        },
+      },
+    }
+  );
 
   // Récupérer la session
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const { data: { user } } = await supabase.auth.getUser();
 
   const pathname = request.nextUrl.pathname;
 
-  // Routes publiques (pas besoin d'être connecté)
+  // Routes publiques
   const publicRoutes = ['/auth/login', '/auth/register', '/auth/forgot-password'];
   const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route));
 
@@ -21,54 +47,46 @@ export async function middleware(request: NextRequest) {
   const isProtectedRoute = pathname.startsWith('/titulaire') || pathname.startsWith('/employe');
 
   // Si pas connecté et route protégée → rediriger vers login
-  if (!session && isProtectedRoute) {
+  if (!user && isProtectedRoute) {
     const loginUrl = new URL('/auth/login', request.url);
     loginUrl.searchParams.set('redirect', pathname);
     return NextResponse.redirect(loginUrl);
   }
 
   // Si connecté et sur une route protégée, vérifier le rôle
-  if (session && isProtectedRoute) {
-    // Récupérer le type d'utilisateur depuis la base de données
+  if (user && isProtectedRoute) {
     const { data: userData } = await supabase
       .from('users')
       .select('user_type')
-      .eq('id', session.user.id)
+      .eq('id', user.id)
       .single();
 
     const userType = userData?.user_type;
 
-    // Vérifier les permissions
     if (pathname.startsWith('/titulaire') && userType !== 'titulaire') {
-      // Un employé essaie d'accéder à la page titulaire
       return NextResponse.redirect(new URL('/employe', request.url));
-    }
-
-    if (pathname.startsWith('/employe') && userType === 'titulaire') {
-      // Un titulaire essaie d'accéder à la page employé (optionnel, on peut autoriser)
-      // return NextResponse.redirect(new URL('/titulaire', request.url));
     }
   }
 
   // Si connecté et sur la page login → rediriger vers dashboard
-  if (session && pathname === '/auth/login') {
+  if (user && pathname === '/auth/login') {
     const { data: userData } = await supabase
       .from('users')
       .select('user_type')
-      .eq('id', session.user.id)
+      .eq('id', user.id)
       .single();
 
     const redirectUrl = userData?.user_type === 'titulaire' ? '/titulaire' : '/employe';
     return NextResponse.redirect(new URL(redirectUrl, request.url));
   }
 
-  // Si sur la racine '/' → rediriger
+  // Si sur la racine '/'
   if (pathname === '/') {
-    if (session) {
+    if (user) {
       const { data: userData } = await supabase
         .from('users')
         .select('user_type')
-        .eq('id', session.user.id)
+        .eq('id', user.id)
         .single();
 
       const redirectUrl = userData?.user_type === 'titulaire' ? '/titulaire' : '/employe';
@@ -78,20 +96,11 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  return res;
+  return response;
 }
 
-// Configurer les routes où le middleware s'applique
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public folder
-     * - api routes (handled separately)
-     */
     '/((?!_next/static|_next/image|favicon.ico|icons|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };
