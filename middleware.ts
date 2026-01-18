@@ -1,8 +1,13 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient } from '@supabase/ssr';
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 
-export async function middleware(req: NextRequest) {
-  const res = NextResponse.next();
+export async function middleware(request: NextRequest) {
+  let response = NextResponse.next({
+    request: {
+      headers: request.headers,
+    },
+  });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -10,87 +15,91 @@ export async function middleware(req: NextRequest) {
     {
       cookies: {
         getAll() {
-          return req.cookies.getAll();
+          return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => {
+            request.cookies.set(name, value);
+          });
+          response = NextResponse.next({
+            request: {
+              headers: request.headers,
+            },
+          });
           cookiesToSet.forEach(({ name, value, options }) => {
-            res.cookies.set(name, value, options);
+            response.cookies.set(name, value, options);
           });
         },
       },
     }
   );
 
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const { data: { user } } = await supabase.auth.getUser();
 
-  const pathname = req.nextUrl.pathname;
+  const pathname = request.nextUrl.pathname;
 
   // Routes publiques
-  const publicRoutes = ["/auth/login", "/auth/register", "/auth/forgot-password"];
-  const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
+  const publicRoutes = ['/auth/login', '/auth/register', '/auth/forgot-password'];
+  const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route));
 
   // Routes protégées
-  const isProtectedRoute =
-    pathname.startsWith("/titulaire") || pathname.startsWith("/employe");
+  const isProtectedRoute = pathname.startsWith('/titulaire') || pathname.startsWith('/employe');
 
-  // Pas connecté + route protégée => login
-  if (!session && isProtectedRoute) {
-    const loginUrl = req.nextUrl.clone();
-    loginUrl.pathname = "/auth/login";
-    loginUrl.searchParams.set("redirect", pathname);
+  // Si pas connecté et route protégée → rediriger vers login
+  if (!user && isProtectedRoute) {
+    const loginUrl = new URL('/auth/login', request.url);
+    loginUrl.searchParams.set('redirect', pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  // Connecté + sur /auth/login => rediriger selon rôle
-  if (session && pathname.startsWith("/auth/login")) {
+  // Si connecté et sur une route protégée, vérifier le rôle
+  if (user && isProtectedRoute) {
     const { data: userData } = await supabase
-      .from("users")
-      .select("user_type")
-      .eq("id", session.user.id)
-      .single();
-
-    const userType = userData?.user_type;
-    const redirectUrl = userType === "titulaire" ? "/titulaire" : "/employe";
-    return NextResponse.redirect(new URL(redirectUrl, req.url));
-  }
-
-  // Si route protégée, vérif du rôle
-  if (session && isProtectedRoute) {
-    const { data: userData } = await supabase
-      .from("users")
-      .select("user_type")
-      .eq("id", session.user.id)
+      .from('users')
+      .select('user_type')
+      .eq('id', user.id)
       .single();
 
     const userType = userData?.user_type;
 
-    if (pathname.startsWith("/titulaire") && userType !== "titulaire") {
-      return NextResponse.redirect(new URL("/employe", req.url));
+    if (pathname.startsWith('/titulaire') && userType !== 'titulaire') {
+      return NextResponse.redirect(new URL('/employe', request.url));
     }
   }
 
-  // Racine => redirect
-  if (pathname === "/") {
-    if (!session) return NextResponse.redirect(new URL("/auth/login", req.url));
-
+  // Si connecté et sur la page login → rediriger vers dashboard
+  if (user && pathname === '/auth/login') {
     const { data: userData } = await supabase
-      .from("users")
-      .select("user_type")
-      .eq("id", session.user.id)
+      .from('users')
+      .select('user_type')
+      .eq('id', user.id)
       .single();
 
-    const userType = userData?.user_type;
-    const redirectUrl = userType === "titulaire" ? "/titulaire" : "/employe";
-    return NextResponse.redirect(new URL(redirectUrl, req.url));
+    const redirectUrl = userData?.user_type === 'titulaire' ? '/titulaire' : '/employe';
+    return NextResponse.redirect(new URL(redirectUrl, request.url));
   }
 
-  return res;
+  // Si sur la racine '/'
+  if (pathname === '/') {
+    if (user) {
+      const { data: userData } = await supabase
+        .from('users')
+        .select('user_type')
+        .eq('id', user.id)
+        .single();
+
+      const redirectUrl = userData?.user_type === 'titulaire' ? '/titulaire' : '/employe';
+      return NextResponse.redirect(new URL(redirectUrl, request.url));
+    } else {
+      return NextResponse.redirect(new URL('/auth/login', request.url));
+    }
+  }
+
+  return response;
 }
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|icons|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    '/((?!_next/static|_next/image|favicon.ico|icons|api|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };
