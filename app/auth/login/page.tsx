@@ -21,48 +21,50 @@ export default function LoginClient() {
   const [error, setError] = useState("");
 
   const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
+  e.preventDefault();
+  setLoading(true);
+  setError("");
 
-    try {
-      const { data: authData, error: authError } =
-        await supabase.auth.signInWithPassword({ email, password });
+  try {
+    const { data: authData, error: authError } =
+      await supabase.auth.signInWithPassword({ email, password });
 
-      if (authError) {
-        setError(authError.message);
-        setLoading(false);
-        return;
-      }
-
-      if (!authData.user) {
-        setError("Erreur de connexion");
-        setLoading(false);
-        return;
-      }
-
-      // ✅ Si redirect est fourni, on le respecte en priorité
-      if (redirectTo) {
-        router.push(redirectTo);
-        return;
-      }
-
-      // Sinon redirection selon user_type
-      const { data: userData } = await supabase
-        .from("users")
-        .select("user_type")
-        .eq("id", authData.user.id)
-        .single();
-
-      const target = userData?.user_type === "titulaire" ? "/titulaire" : "/employe";
-      router.push(target);
-    } catch (err) {
-      console.error("Login error:", err);
-      setError("Une erreur est survenue");
-    } finally {
+    if (authError) {
+      setError(authError.message);
       setLoading(false);
+      return;
     }
-  };
+
+    if (!authData.user) {
+      setError("Erreur de connexion");
+      setLoading(false);
+      return;
+    }
+
+    // ✅ Si redirect est fourni, on le respecte en priorité
+    if (redirectTo) {
+      // Utiliser window.location pour un refresh complet (permet au middleware de détecter le cookie)
+      window.location.href = redirectTo;
+      return;
+    }
+
+    // Sinon redirection selon user_type
+    const { data: userData } = await supabase
+      .from("users")
+      .select("user_type")
+      .eq("id", authData.user.id)
+      .single();
+
+    const target = userData?.user_type === "titulaire" ? "/titulaire" : "/employe";
+    
+    // Utiliser window.location au lieu de router.push
+    window.location.href = target;
+  } catch (err) {
+    console.error("Login error:", err);
+    setError("Une erreur est survenue");
+  }
+  // Retirer le finally avec setLoading(false) car on fait une redirection complète
+};
 
   const fillDemo = (demoEmail: string, demoPassword: string) => {
     setEmail(demoEmail);
