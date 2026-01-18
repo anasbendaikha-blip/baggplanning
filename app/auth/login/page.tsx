@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-export default function LoginClient() {
-  const router = useRouter();
+// Composant interne qui utilise useSearchParams
+function LoginForm() {
   const searchParams = useSearchParams();
 
   const redirectTo = useMemo(() => {
@@ -40,13 +40,11 @@ export default function LoginClient() {
         return;
       }
 
-      // ✅ Si redirect est fourni, on le respecte en priorité
       if (redirectTo) {
         window.location.href = redirectTo;
         return;
       }
 
-      // Sinon redirection selon user_type
       const { data: userData } = await supabase
         .from("users")
         .select("user_type")
@@ -68,6 +66,109 @@ export default function LoginClient() {
     setError("");
   };
 
+  return (
+    <div className="login-card">
+      <form onSubmit={handleLogin}>
+        {error && (
+          <div className="error-message">
+            <span>⚠️</span>
+            <span>{error}</span>
+          </div>
+        )}
+
+        <div className="form-group">
+          <label className="form-label" htmlFor="email">Email</label>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            className="form-input"
+            placeholder="votre@email.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            autoComplete="email"
+          />
+        </div>
+
+        <div className="form-group">
+          <label className="form-label" htmlFor="password">Mot de passe</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            className="form-input"
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            autoComplete="current-password"
+          />
+        </div>
+
+        <button type="submit" className="submit-btn" disabled={loading}>
+          {loading ? "⏳ Connexion en cours..." : "🔐 Se connecter"}
+        </button>
+      </form>
+
+      <div className="divider">
+        <div className="divider-line" />
+        <span className="divider-text">COMPTES DÉMO</span>
+        <div className="divider-line" />
+      </div>
+
+      <div className="demo-accounts">
+        <div className="demo-title">Tester l'application</div>
+
+        <div className="demo-account">
+          <div>
+            <div className="demo-role">👩‍💼 Titulaire</div>
+            <div className="demo-email">titulaire@pharmacie.fr</div>
+          </div>
+          <button
+            className="demo-btn"
+            type="button"
+            onClick={() => fillDemo("titulaire@pharmacie.fr", "demo123")}
+          >
+            Utiliser
+          </button>
+        </div>
+
+        <div className="demo-account">
+          <div>
+            <div className="demo-role">🎓 Étudiant</div>
+            <div className="demo-email">anas@email.com</div>
+          </div>
+          <button
+            className="demo-btn"
+            type="button"
+            onClick={() => fillDemo("anas@email.com", "demo123")}
+          >
+            Utiliser
+          </button>
+        </div>
+      </div>
+
+      <div className="info-box">
+        💡 <strong>Astuce :</strong> Clique sur "Utiliser" puis "Se connecter".
+      </div>
+    </div>
+  );
+}
+
+// Loading fallback
+function LoginFormLoading() {
+  return (
+    <div className="login-card">
+      <div style={{ textAlign: 'center', padding: '40px' }}>
+        <div>⏳ Chargement...</div>
+      </div>
+    </div>
+  );
+}
+
+// Composant principal avec Suspense
+export default function LoginPage() {
   const styles = `
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Inter', -apple-system, sans-serif; }
@@ -109,92 +210,9 @@ export default function LoginClient() {
             <p className="subtitle">Gestion des plannings de la pharmacie</p>
           </div>
 
-          <div className="login-card">
-            <form onSubmit={handleLogin}>
-              {error && (
-                <div className="error-message">
-                  <span>⚠️</span>
-                  <span>{error}</span>
-                </div>
-              )}
-
-              <div className="form-group">
-                <label className="form-label" htmlFor="email">Email</label>
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  className="form-input"
-                  placeholder="votre@email.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  autoComplete="email"
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label" htmlFor="password">Mot de passe</label>
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  className="form-input"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  autoComplete="current-password"
-                />
-              </div>
-
-              <button type="submit" className="submit-btn" disabled={loading}>
-                {loading ? "⏳ Connexion en cours..." : "🔐 Se connecter"}
-              </button>
-            </form>
-
-            <div className="divider">
-              <div className="divider-line" />
-              <span className="divider-text">COMPTES DÉMO</span>
-              <div className="divider-line" />
-            </div>
-
-            <div className="demo-accounts">
-              <div className="demo-title">Tester l'application</div>
-
-              <div className="demo-account">
-                <div>
-                  <div className="demo-role">👩‍💼 Titulaire</div>
-                  <div className="demo-email">titulaire@pharmacie.fr</div>
-                </div>
-                <button
-                  className="demo-btn"
-                  type="button"
-                  onClick={() => fillDemo("titulaire@pharmacie.fr", "demo123")}
-                >
-                  Utiliser
-                </button>
-              </div>
-
-              <div className="demo-account">
-                <div>
-                  <div className="demo-role">🎓 Étudiant</div>
-                  <div className="demo-email">anas@email.com</div>
-                </div>
-                <button
-                  className="demo-btn"
-                  type="button"
-                  onClick={() => fillDemo("anas@email.com", "demo123")}
-                >
-                  Utiliser
-                </button>
-              </div>
-            </div>
-
-            <div className="info-box">
-              💡 <strong>Astuce :</strong> Clique sur "Utiliser" puis "Se connecter".
-            </div>
-          </div>
+          <Suspense fallback={<LoginFormLoading />}>
+            <LoginForm />
+          </Suspense>
         </div>
       </div>
     </div>
