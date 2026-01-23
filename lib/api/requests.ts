@@ -1,0 +1,350 @@
+// ============================================================
+// 📁 lib/api/requests.ts
+// ============================================================
+// Fonctions API pour gérer les demandes
+// ============================================================
+
+import { createClient } from '@/utils/supabase/client'
+import { Request, RequestType, RequestStatus } from '@/types/supabase'
+
+// ============================================================
+// TYPES
+// ============================================================
+
+export interface RequestWithEmployee extends Request {
+  employee: {
+    id: string
+    prenom: string
+    nom: string | null
+    initiales: string
+    role: string
+  }
+  exchange_with?: {
+    id: string
+    prenom: string
+    nom: string | null
+  } | null
+  replacement?: {
+    id: string
+    prenom: string
+    nom: string | null
+  } | null
+}
+
+// ============================================================
+// LECTURE
+// ============================================================
+
+/**
+ * Récupérer toutes les demandes en attente
+ */
+export async function getPendingRequests(): Promise<RequestWithEmployee[]> {
+  const supabase = createClient()
+  
+  const { data, error } = await supabase
+    .from('requests')
+    .select(`
+      *,
+      employee:employees!requests_employee_id_fkey(id, prenom, nom, initiales, role),
+      exchange_with:employees!requests_exchange_with_id_fkey(id, prenom, nom),
+      replacement:employees!requests_replacement_id_fkey(id, prenom, nom)
+    `)
+    .eq('status', 'pending')
+    .order('is_urgent', { ascending: false })
+    .order('created_at', { ascending: true })
+  
+  if (error) {
+    console.error('Erreur getPendingRequests:', error)
+    throw new Error(error.message)
+  }
+  
+  return (data as unknown as RequestWithEmployee[]) || []
+}
+
+/**
+ * Récupérer toutes les demandes (tous statuts)
+ */
+export async function getAllRequests(): Promise<RequestWithEmployee[]> {
+  const supabase = createClient()
+  
+  const { data, error } = await supabase
+    .from('requests')
+    .select(`
+      *,
+      employee:employees!requests_employee_id_fkey(id, prenom, nom, initiales, role),
+      exchange_with:employees!requests_exchange_with_id_fkey(id, prenom, nom),
+      replacement:employees!requests_replacement_id_fkey(id, prenom, nom)
+    `)
+    .order('created_at', { ascending: false })
+  
+  if (error) {
+    console.error('Erreur getAllRequests:', error)
+    throw new Error(error.message)
+  }
+  
+  return (data as unknown as RequestWithEmployee[]) || []
+}
+
+/**
+ * Récupérer une demande par ID
+ */
+export async function getRequestById(id: string): Promise<RequestWithEmployee | null> {
+  const supabase = createClient()
+  
+  const { data, error } = await supabase
+    .from('requests')
+    .select(`
+      *,
+      employee:employees!requests_employee_id_fkey(id, prenom, nom, initiales, role),
+      exchange_with:employees!requests_exchange_with_id_fkey(id, prenom, nom),
+      replacement:employees!requests_replacement_id_fkey(id, prenom, nom)
+    `)
+    .eq('id', id)
+    .single()
+  
+  if (error) {
+    console.error('Erreur getRequestById:', error)
+    return null
+  }
+  
+  return data as unknown as RequestWithEmployee
+}
+
+/**
+ * Récupérer les demandes d'un employé
+ */
+export async function getEmployeeRequests(employeeId: string): Promise<Request[]> {
+  const supabase = createClient()
+  
+  const { data, error } = await supabase
+    .from('requests')
+    .select('*')
+    .eq('employee_id', employeeId)
+    .order('created_at', { ascending: false })
+  
+  if (error) {
+    console.error('Erreur getEmployeeRequests:', error)
+    throw new Error(error.message)
+  }
+  
+  return data || []
+}
+
+/**
+ * Compter les demandes en attente
+ */
+export async function countPendingRequests(): Promise<number> {
+  const supabase = createClient()
+  
+  const { count, error } = await supabase
+    .from('requests')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'pending')
+  
+  if (error) {
+    console.error('Erreur countPendingRequests:', error)
+    throw new Error(error.message)
+  }
+  
+  return count || 0
+}
+
+// ============================================================
+// CRÉATION
+// ============================================================
+
+/**
+ * Créer une nouvelle demande
+ */
+export async function createRequest(request: {
+  employee_id: string
+  type: RequestType
+  date: string
+  start_time?: string
+  end_time?: string
+  is_full_day?: boolean
+  motif?: string
+  is_urgent?: boolean
+  exchange_with_id?: string
+}): Promise<Request> {
+  const supabase = createClient()
+  
+  const { data, error } = await supabase
+    .from('requests')
+    .insert({
+      employee_id: request.employee_id,
+      type: request.type,
+      date: request.date,
+      start_time: request.start_time || null,
+      end_time: request.end_time || null,
+      is_full_day: request.is_full_day || false,
+      motif: request.motif || null,
+      is_urgent: request.is_urgent || false,
+      exchange_with_id: request.exchange_with_id || null,
+      status: 'pending',
+    })
+    .select()
+    .single()
+  
+  if (error) {
+    console.error('Erreur createRequest:', error)
+    throw new Error(error.message)
+  }
+  
+  return data
+}
+
+// ============================================================
+// MISE À JOUR
+// ============================================================
+
+/**
+ * Approuver une demande
+ */
+export async function approveRequest(
+  id: string,
+  replacementId?: string
+): Promise<Request> {
+  const supabase = createClient()
+  
+  const { data, error } = await supabase
+    .from('requests')
+    .update({
+      status: 'approved',
+      replacement_id: replacementId || null,
+      processed_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .select()
+    .single()
+  
+  if (error) {
+    console.error('Erreur approveRequest:', error)
+    throw new Error(error.message)
+  }
+  
+  return data
+}
+
+/**
+ * Refuser une demande
+ */
+export async function refuseRequest(id: string): Promise<Request> {
+  const supabase = createClient()
+  
+  const { data, error } = await supabase
+    .from('requests')
+    .update({
+      status: 'refused',
+      processed_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .select()
+    .single()
+  
+  if (error) {
+    console.error('Erreur refuseRequest:', error)
+    throw new Error(error.message)
+  }
+  
+  return data
+}
+
+/**
+ * Assigner un remplaçant
+ */
+export async function assignReplacement(
+  requestId: string,
+  replacementId: string
+): Promise<Request> {
+  const supabase = createClient()
+  
+  const { data, error } = await supabase
+    .from('requests')
+    .update({
+      replacement_id: replacementId,
+    })
+    .eq('id', requestId)
+    .select()
+    .single()
+  
+  if (error) {
+    console.error('Erreur assignReplacement:', error)
+    throw new Error(error.message)
+  }
+  
+  return data
+}
+
+// ============================================================
+// SUPPRESSION
+// ============================================================
+
+/**
+ * Supprimer une demande
+ */
+export async function deleteRequest(id: string): Promise<void> {
+  const supabase = createClient()
+  
+  const { error } = await supabase
+    .from('requests')
+    .delete()
+    .eq('id', id)
+  
+  if (error) {
+    console.error('Erreur deleteRequest:', error)
+    throw new Error(error.message)
+  }
+}
+
+// ============================================================
+// UTILITAIRES
+// ============================================================
+
+/**
+ * Obtenir le libellé français pour un type de demande
+ */
+export function getRequestTypeLabel(type: RequestType): string {
+  const labels: Record<RequestType, string> = {
+    conge: 'Congé',
+    echange: 'Échange',
+    maladie: 'Maladie',
+  }
+  return labels[type] || type
+}
+
+/**
+ * Obtenir l'emoji pour un type de demande
+ */
+export function getRequestTypeIcon(type: RequestType): string {
+  const icons: Record<RequestType, string> = {
+    conge: '🏖️',
+    echange: '🔄',
+    maladie: '🏥',
+  }
+  return icons[type] || '📋'
+}
+
+/**
+ * Obtenir la couleur pour un type de demande
+ */
+export function getRequestTypeColor(type: RequestType): string {
+  const colors: Record<RequestType, string> = {
+    conge: '#3b82f6', // Bleu
+    echange: '#8b5cf6', // Violet
+    maladie: '#ef4444', // Rouge
+  }
+  return colors[type] || '#64748b'
+}
+
+/**
+ * Obtenir le libellé français pour un statut
+ */
+export function getRequestStatusLabel(status: RequestStatus): string {
+  const labels: Record<RequestStatus, string> = {
+    pending: 'En attente',
+    approved: 'Approuvée',
+    refused: 'Refusée',
+  }
+  return labels[status] || status
+}
