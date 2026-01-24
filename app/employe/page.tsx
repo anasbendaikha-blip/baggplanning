@@ -1,33 +1,63 @@
-"use client";
+'use client'
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
-import { Employee, Disponibilite, Planning, Demande } from '@/types/database';
+import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/utils/supabase/client'
+import type { Employee } from '@/types/supabase'
+
+type DisponibiliteRow = Record<string, any>
+
+type PlanningRow = {
+  id: string
+  employee_id: string
+  date: string
+  debut: string
+  fin: string
+}
+
+type DemandeRow = {
+  id: string
+  employee_id: string
+  type: 'conge' | 'echange' | 'maladie' | 'autre'
+  date_debut: string
+  date_fin: string
+  creneau: 'journee' | 'matin' | 'apres-midi'
+  motif: string | null
+  urgent: boolean
+  status: 'en_attente' | 'approuve' | 'refuse'
+  created_at?: string | null
+}
 
 export default function EmployePage() {
-  const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [employee, setEmployee] = useState<Employee | null>(null);
-  const [onglet, setOnglet] = useState("dispos");
-  const [toast, setToast] = useState({ visible: false, message: "", type: "success" });
-  
+  const router = useRouter()
+  const supabase = useMemo(() => createClient(), [])
+
+  const [loading, setLoading] = useState(true)
+  const [employee, setEmployee] = useState<Employee | null>(null)
+
+  const [onglet, setOnglet] = useState<'dispos' | 'demande' | 'planning' | 'historique'>('dispos')
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' }>({
+    visible: false,
+    message: '',
+    type: 'success',
+  })
+
   // Disponibilités
-  const [disponibilite, setDisponibilite] = useState<Disponibilite | null>(null);
+  const [disponibilite, setDisponibilite] = useState<DisponibiliteRow | null>(null)
   const [dispoForm, setDispoForm] = useState<Record<string, { disponible: boolean; debut: string; fin: string }>>({
-    lundi: { disponible: false, debut: "08:30", fin: "20:30" },
-    mardi: { disponible: false, debut: "08:30", fin: "20:30" },
-    mercredi: { disponible: false, debut: "08:30", fin: "20:30" },
-    jeudi: { disponible: false, debut: "08:30", fin: "20:30" },
-    vendredi: { disponible: false, debut: "08:30", fin: "20:30" },
-    samedi: { disponible: false, debut: "08:30", fin: "19:30" },
-  });
-  
+    lundi: { disponible: false, debut: '08:30', fin: '20:30' },
+    mardi: { disponible: false, debut: '08:30', fin: '20:30' },
+    mercredi: { disponible: false, debut: '08:30', fin: '20:30' },
+    jeudi: { disponible: false, debut: '08:30', fin: '20:30' },
+    vendredi: { disponible: false, debut: '08:30', fin: '20:30' },
+    samedi: { disponible: false, debut: '08:30', fin: '19:30' },
+  })
+
   // Planning
-  const [planning, setPlanning] = useState<Planning[]>([]);
-  
+  const [planning, setPlanning] = useState<PlanningRow[]>([])
+
   // Demandes
-  const [demandes, setDemandes] = useState<Demande[]>([]);
+  const [demandes, setDemandes] = useState<DemandeRow[]>([])
   const [demandeForm, setDemandeForm] = useState({
     type: 'conge' as const,
     date_debut: '',
@@ -35,222 +65,275 @@ export default function EmployePage() {
     creneau: 'journee' as const,
     motif: '',
     urgent: false,
-  });
+  })
 
-  const [savingDispo, setSavingDispo] = useState(false);
-  const [sendingDemande, setSendingDemande] = useState(false);
+  const [savingDispo, setSavingDispo] = useState(false)
+  const [sendingDemande, setSendingDemande] = useState(false)
 
   // Calculer le lundi de la semaine courante
   const getMondayOfWeek = () => {
-    const d = new Date();
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-    d.setDate(diff);
-    return d.toISOString().split('T')[0];
-  };
+    const d = new Date()
+    const day = d.getDay()
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1)
+    d.setDate(diff)
+    return d.toISOString().split('T')[0]
+  }
 
-  const [semaineDebut, setSemaineDebut] = useState(getMondayOfWeek());
+  const [semaineDebut, setSemaineDebut] = useState(getMondayOfWeek())
 
-  // Charger les données au démarrage
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ visible: true, message, type })
+    setTimeout(() => setToast({ visible: false, message: '', type: 'success' }), 3500)
+  }
+
+  // =========================
+  // AUTH + LOAD DATA
+  // =========================
   useEffect(() => {
     const loadData = async () => {
-      // Vérifier l'authentification
-      const { data: { user } } = await supabase.auth.getUser();
-      
+      setLoading(true)
+
+      const {
+        data: { user },
+        error: authErr,
+      } = await supabase.auth.getUser()
+
+      if (authErr) console.error('auth.getUser error', authErr)
+
       if (!user) {
-        router.push('/auth/login');
-        return;
+        router.replace('/auth/login')
+        return
       }
 
-      // Récupérer les infos de l'utilisateur
-      const { data: userData } = await supabase
+      const { data: userData, error: userErr } = await supabase
         .from('users')
-        .select('*, employees(*)')
+        .select('id, user_type, employee_id, employees(*)')
         .eq('id', user.id)
-        .single();
+        .single()
+
+      if (userErr) {
+        console.error('Erreur fetch users:', userErr)
+        router.replace('/auth/login')
+        return
+      }
 
       if (!userData || userData.user_type !== 'employe') {
-        router.push('/auth/login');
-        return;
+        router.replace('/auth/login')
+        return
       }
 
-      setEmployee(userData.employees);
-      
-      // Charger les données
-      await Promise.all([
-        loadDisponibilite(userData.employee_id),
-        loadPlanning(userData.employee_id),
-        loadDemandes(userData.employee_id),
-      ]);
+      // ⚠️ Selon la relation Supabase, `employees` peut être un objet OU un tableau
+      const employeesData = (userData as any).employees
+      const emp: Employee | null = Array.isArray(employeesData) ? (employeesData[0] ?? null) : (employeesData ?? null)
 
-      setLoading(false);
-    };
+      if (!emp) {
+        console.error('Aucun employee relié à ce user')
+        router.replace('/auth/login')
+        return
+      }
 
-    loadData();
-  }, [router, semaineDebut]);
+      setEmployee(emp)
 
-  const loadDisponibilite = async (employeeId: number) => {
-    const { data } = await supabase
+      await Promise.all([loadDisponibilite(emp.id), loadPlanning(emp.id), loadDemandes(emp.id)])
+
+      setLoading(false)
+    }
+
+    loadData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router, semaineDebut])
+
+  // =========================
+  // LOADERS
+  // =========================
+  const loadDisponibilite = async (employeeId: string) => {
+    const { data, error } = await supabase
       .from('disponibilites')
       .select('*')
       .eq('employee_id', employeeId)
       .eq('semaine_debut', semaineDebut)
-      .single();
+      .single()
+
+    if (error) {
+      // pas grave si pas de ligne (pas encore saisi)
+      // PGRST116 = "No rows" sur .single()
+      if ((error as any).code !== 'PGRST116') console.error('Erreur loadDisponibilite:', error)
+      return
+    }
 
     if (data) {
-      setDisponibilite(data);
-      // Remplir le formulaire
-      const jours = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
-      const newForm: typeof dispoForm = {};
-      jours.forEach(jour => {
-        newForm[jour] = {
-          disponible: data[`${jour}_disponible`] || false,
-          debut: data[`${jour}_debut`] || "08:30",
-          fin: data[`${jour}_fin`] || (jour === 'samedi' ? "19:30" : "20:30"),
-        };
-      });
-      setDispoForm(newForm);
-    }
-  };
+      setDisponibilite(data)
 
-  const loadPlanning = async (employeeId: number) => {
-    const dateFin = new Date(semaineDebut);
-    dateFin.setDate(dateFin.getDate() + 5);
-    
-    const { data } = await supabase
+      const jours = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi']
+      const newForm: typeof dispoForm = { ...dispoForm }
+
+      jours.forEach((jour) => {
+        newForm[jour] = {
+          disponible: Boolean((data as any)[`${jour}_disponible`]),
+          debut: (data as any)[`${jour}_debut`] ?? '08:30',
+          fin: (data as any)[`${jour}_fin`] ?? (jour === 'samedi' ? '19:30' : '20:30'),
+        }
+      })
+
+      setDispoForm(newForm)
+    }
+  }
+
+  const loadPlanning = async (employeeId: string) => {
+    const dateFin = new Date(semaineDebut)
+    dateFin.setDate(dateFin.getDate() + 5)
+    const dateFinStr = dateFin.toISOString().split('T')[0]
+
+    const { data, error } = await supabase
       .from('planning')
       .select('*')
       .eq('employee_id', employeeId)
       .gte('date', semaineDebut)
-      .lte('date', dateFin.toISOString().split('T')[0])
-      .order('date');
+      .lte('date', dateFinStr)
+      .order('date')
 
-    setPlanning(data || []);
-  };
+    if (error) {
+      console.error('Erreur loadPlanning:', error)
+      setPlanning([])
+      return
+    }
 
-  const loadDemandes = async (employeeId: number) => {
-    const { data } = await supabase
+    setPlanning((data as PlanningRow[]) ?? [])
+  }
+
+  const loadDemandes = async (employeeId: string) => {
+    const { data, error } = await supabase
       .from('demandes')
       .select('*')
       .eq('employee_id', employeeId)
       .order('created_at', { ascending: false })
-      .limit(10);
-
-    setDemandes(data || []);
-  };
-
-  const showToast = (message: string, type: "success" | "error" = "success") => {
-    setToast({ visible: true, message, type });
-    setTimeout(() => setToast({ visible: false, message: "", type: "success" }), 3500);
-  };
-
-  const saveDisponibilites = async () => {
-    if (!employee) return;
-    
-    setSavingDispo(true);
-    
-    const data: any = {
-      employee_id: employee.id,
-      semaine_debut: semaineDebut,
-    };
-
-    const jours = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
-    jours.forEach(jour => {
-      data[`${jour}_disponible`] = dispoForm[jour].disponible;
-      data[`${jour}_debut`] = dispoForm[jour].disponible ? dispoForm[jour].debut : null;
-      data[`${jour}_fin`] = dispoForm[jour].disponible ? dispoForm[jour].fin : null;
-    });
-
-    const { error } = await supabase
-      .from('disponibilites')
-      .upsert([data], { onConflict: 'employee_id,semaine_debut' });
-
-    setSavingDispo(false);
+      .limit(10)
 
     if (error) {
-      showToast("Erreur: " + error.message, "error");
-    } else {
-      showToast("Disponibilités enregistrées !");
-      loadDisponibilite(employee.id);
+      console.error('Erreur loadDemandes:', error)
+      setDemandes([])
+      return
     }
-  };
+
+    setDemandes((data as DemandeRow[]) ?? [])
+  }
+
+  // =========================
+  // ACTIONS
+  // =========================
+  const saveDisponibilites = async () => {
+    if (!employee) return
+    setSavingDispo(true)
+
+    const payload: Record<string, any> = {
+      employee_id: employee.id,
+      semaine_debut: semaineDebut,
+    }
+
+    const jours = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi']
+    jours.forEach((jour) => {
+      payload[`${jour}_disponible`] = dispoForm[jour].disponible
+      payload[`${jour}_debut`] = dispoForm[jour].disponible ? dispoForm[jour].debut : null
+      payload[`${jour}_fin`] = dispoForm[jour].disponible ? dispoForm[jour].fin : null
+    })
+
+    const { error } = await supabase.from('disponibilites').upsert([payload], { onConflict: 'employee_id,semaine_debut' })
+
+    setSavingDispo(false)
+
+    if (error) {
+      showToast('Erreur: ' + error.message, 'error')
+      return
+    }
+
+    showToast('Disponibilités enregistrées !')
+    await loadDisponibilite(employee.id)
+  }
 
   const sendDemande = async () => {
-    if (!employee) return;
+    if (!employee) return
     if (!demandeForm.date_debut || !demandeForm.date_fin) {
-      showToast("Veuillez remplir les dates", "error");
-      return;
+      showToast('Veuillez remplir les dates', 'error')
+      return
     }
 
-    setSendingDemande(true);
+    setSendingDemande(true)
 
-    const { error } = await supabase
-      .from('demandes')
-      .insert([{
+    const { error } = await supabase.from('demandes').insert([
+      {
         employee_id: employee.id,
         type: demandeForm.type,
         date_debut: demandeForm.date_debut,
         date_fin: demandeForm.date_fin,
         creneau: demandeForm.creneau,
-        motif: demandeForm.motif,
+        motif: demandeForm.motif || null,
         urgent: demandeForm.urgent,
         status: 'en_attente',
-      }]);
+      },
+    ])
 
-    setSendingDemande(false);
+    setSendingDemande(false)
 
     if (error) {
-      showToast("Erreur: " + error.message, "error");
-    } else {
-      showToast("Demande envoyée !");
-      setDemandeForm({
-        type: 'conge',
-        date_debut: '',
-        date_fin: '',
-        creneau: 'journee',
-        motif: '',
-        urgent: false,
-      });
-      loadDemandes(employee.id);
+      showToast('Erreur: ' + error.message, 'error')
+      return
     }
-  };
+
+    showToast('Demande envoyée !')
+    setDemandeForm({
+      type: 'conge',
+      date_debut: '',
+      date_fin: '',
+      creneau: 'journee',
+      motif: '',
+      urgent: false,
+    })
+    await loadDemandes(employee.id)
+  }
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push('/auth/login');
-  };
+    await supabase.auth.signOut()
+    router.replace('/auth/login')
+  }
 
+  // =========================
+  // UI HELPERS
+  // =========================
   const toggleDispo = (jour: string) => {
-    setDispoForm(prev => ({
+    setDispoForm((prev) => ({
       ...prev,
-      [jour]: { ...prev[jour], disponible: !prev[jour].disponible }
-    }));
-  };
+      [jour]: { ...prev[jour], disponible: !prev[jour].disponible },
+    }))
+  }
 
   const updateHeure = (jour: string, field: 'debut' | 'fin', value: string) => {
-    setDispoForm(prev => ({
+    setDispoForm((prev) => ({
       ...prev,
-      [jour]: { ...prev[jour], [field]: value }
-    }));
-  };
+      [jour]: { ...prev[jour], [field]: value },
+    }))
+  }
 
   const setAllAvailable = () => {
-    const newForm: typeof dispoForm = {};
-    Object.keys(dispoForm).forEach(jour => {
-      newForm[jour] = { ...dispoForm[jour], disponible: true };
-    });
-    setDispoForm(newForm);
-  };
+    const newForm: typeof dispoForm = {}
+    Object.keys(dispoForm).forEach((jour) => {
+      newForm[jour] = { ...dispoForm[jour], disponible: true }
+    })
+    setDispoForm(newForm)
+  }
 
   const clearAll = () => {
-    const newForm: typeof dispoForm = {};
-    Object.keys(dispoForm).forEach(jour => {
-      newForm[jour] = { ...dispoForm[jour], disponible: false };
-    });
-    setDispoForm(newForm);
-  };
+    const newForm: typeof dispoForm = {}
+    Object.keys(dispoForm).forEach((jour) => {
+      newForm[jour] = { ...dispoForm[jour], disponible: false }
+    })
+    setDispoForm(newForm)
+  }
 
-  const heures = ["08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30", "20:00", "20:30"];
+  const heures = [
+    '08:30','09:00','09:30','10:00','10:30','11:00','11:30','12:00','12:30',
+    '13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00',
+    '17:30','18:00','18:30','19:00','19:30','20:00','20:30',
+  ]
 
   const joursLabels = [
     { key: 'lundi', label: 'Lundi', short: 'Lun' },
@@ -259,37 +342,40 @@ export default function EmployePage() {
     { key: 'jeudi', label: 'Jeudi', short: 'Jeu' },
     { key: 'vendredi', label: 'Vendredi', short: 'Ven' },
     { key: 'samedi', label: 'Samedi', short: 'Sam' },
-  ];
+  ]
 
   const getDateForDay = (index: number) => {
-    const d = new Date(semaineDebut);
-    d.setDate(d.getDate() + index);
-    return d.getDate();
-  };
+    const d = new Date(semaineDebut)
+    d.setDate(d.getDate() + index)
+    return d.getDate()
+  }
 
   const calculerTotalHeures = () => {
-    let total = 0;
-    Object.values(dispoForm).forEach(jour => {
+    let total = 0
+    Object.values(dispoForm).forEach((jour) => {
       if (jour.disponible && jour.debut && jour.fin) {
-        const [hd, md] = jour.debut.split(':').map(Number);
-        const [hf, mf] = jour.fin.split(':').map(Number);
-        total += (hf * 60 + mf) - (hd * 60 + md);
+        const [hd, md] = jour.debut.split(':').map(Number)
+        const [hf, mf] = jour.fin.split(':').map(Number)
+        total += hf * 60 + mf - (hd * 60 + md)
       }
-    });
-    const h = Math.floor(total / 60);
-    const m = total % 60;
-    return m > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${h}h`;
-  };
+    })
+    const h = Math.floor(total / 60)
+    const m = total % 60
+    return m > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${h}h`
+  }
 
-  const formatHeure = (h: string) => h?.replace(':', 'h') || '';
+  const formatHeure = (h: string) => (h ? h.replace(':', 'h') : '')
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'approuve': return { bg: '#d1fae5', color: '#047857', text: '✓ Approuvé' };
-      case 'refuse': return { bg: '#fee2e2', color: '#b91c1c', text: '✗ Refusé' };
-      default: return { bg: '#fef3c7', color: '#b45309', text: '⏳ En attente' };
+      case 'approuve':
+        return { bg: '#d1fae5', color: '#047857', text: '✓ Approuvé' }
+      case 'refuse':
+        return { bg: '#fee2e2', color: '#b91c1c', text: '✗ Refusé' }
+      default:
+        return { bg: '#fef3c7', color: '#b45309', text: '⏳ En attente' }
     }
-  };
+  }
 
   const styles = `
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -343,10 +429,8 @@ export default function EmployePage() {
     .time-arrow { color: #94a3b8; font-size: 14px; }
     .btn { padding: 14px 24px; border: none; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s; width: 100%; }
     .btn-primary { background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; }
-    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(59,130,246,0.3); }
     .btn-primary:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
     .btn-success { background: linear-gradient(135deg, #10b981, #059669); color: white; }
-    .btn-success:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(16,185,129,0.3); }
     .form-group { margin-bottom: 20px; }
     .form-label { display: block; font-weight: 600; color: #334155; font-size: 14px; margin-bottom: 8px; }
     .form-input { width: 100%; padding: 14px 16px; background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 15px; font-family: inherit; }
@@ -354,13 +438,9 @@ export default function EmployePage() {
     .form-textarea { min-height: 100px; resize: vertical; }
     .type-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
     .type-option { padding: 16px; border: 2px solid #e2e8f0; border-radius: 12px; text-align: center; cursor: pointer; transition: all 0.2s; }
-    .type-option:hover { border-color: #cbd5e1; }
     .type-option.selected { border-color: #3b82f6; background: #eff6ff; }
-    .type-icon { font-size: 24px; margin-bottom: 4px; }
-    .type-label { font-weight: 600; font-size: 13px; color: #334155; }
     .creneau-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
     .creneau-option { padding: 12px; border: 2px solid #e2e8f0; border-radius: 10px; text-align: center; cursor: pointer; font-size: 13px; font-weight: 600; color: #475569; }
-    .creneau-option:hover { border-color: #cbd5e1; }
     .creneau-option.selected { border-color: #3b82f6; background: #eff6ff; color: #1d4ed8; }
     .planning-day { background: #f8fafc; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
     .planning-day-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
@@ -384,7 +464,7 @@ export default function EmployePage() {
     .checkbox-label { display: flex; align-items: center; gap: 10px; cursor: pointer; }
     .checkbox-label input { width: 20px; height: 20px; cursor: pointer; }
     @media (max-width: 600px) { .day-grid { grid-template-columns: 1fr; } .type-grid { grid-template-columns: 1fr; } }
-  `;
+  `
 
   if (loading) {
     return (
@@ -392,7 +472,7 @@ export default function EmployePage() {
         <style dangerouslySetInnerHTML={{ __html: styles }} />
         <div className="loading">⏳ Chargement...</div>
       </div>
-    );
+    )
   }
 
   return (
@@ -414,7 +494,9 @@ export default function EmployePage() {
               <div className="user-avatar">{employee?.prenom?.substring(0, 2).toUpperCase()}</div>
               <span className="user-name">{employee?.prenom}</span>
             </div>
-            <button className="logout-btn" onClick={handleLogout}>Déconnexion</button>
+            <button className="logout-btn" onClick={handleLogout}>
+              Déconnexion
+            </button>
           </div>
         </div>
       </header>
@@ -434,7 +516,10 @@ export default function EmployePage() {
             <span className="tab-icon">📅</span>
             <span>Planning</span>
           </button>
-          <button className={`tab ${onglet === 'historique' ? 'active' : ''}`} onClick={() => setOnglet('historique')}>
+          <button
+            className={`tab ${onglet === 'historique' ? 'active' : ''}`}
+            onClick={() => setOnglet('historique')}
+          >
             <span className="tab-icon">📋</span>
             <span>Historique</span>
           </button>
@@ -448,13 +533,19 @@ export default function EmployePage() {
           <div className="card">
             <div className="card-header">
               <div className="card-title">✋ Mes disponibilités</div>
-              <div className="card-subtitle">Semaine du {new Date(semaineDebut).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</div>
+              <div className="card-subtitle">
+                Semaine du {new Date(semaineDebut).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}
+              </div>
               <div className="total-badge">⏱️ Total: {calculerTotalHeures()}</div>
             </div>
             <div className="card-body">
               <div className="quick-actions">
-                <button className="quick-btn" onClick={setAllAvailable}>✅ Tout disponible</button>
-                <button className="quick-btn" onClick={clearAll}>❌ Tout effacer</button>
+                <button className="quick-btn" onClick={setAllAvailable}>
+                  ✅ Tout disponible
+                </button>
+                <button className="quick-btn" onClick={clearAll}>
+                  ❌ Tout effacer
+                </button>
               </div>
 
               <div className="day-grid">
@@ -465,27 +556,36 @@ export default function EmployePage() {
                         <div className="day-name">{jour.label}</div>
                         <div className="day-date">{getDateForDay(index)} janvier</div>
                       </div>
-                      <button 
+                      <button
                         className={`toggle-btn ${dispoForm[jour.key].disponible ? 'on' : 'off'}`}
                         onClick={() => toggleDispo(jour.key)}
                       />
                     </div>
+
                     {dispoForm[jour.key].disponible && (
                       <div className="time-selectors">
-                        <select 
-                          className="time-select" 
+                        <select
+                          className="time-select"
                           value={dispoForm[jour.key].debut}
                           onChange={(e) => updateHeure(jour.key, 'debut', e.target.value)}
                         >
-                          {heures.map(h => <option key={h} value={h}>{formatHeure(h)}</option>)}
+                          {heures.map((h) => (
+                            <option key={h} value={h}>
+                              {formatHeure(h)}
+                            </option>
+                          ))}
                         </select>
                         <span className="time-arrow">→</span>
-                        <select 
-                          className="time-select" 
+                        <select
+                          className="time-select"
                           value={dispoForm[jour.key].fin}
                           onChange={(e) => updateHeure(jour.key, 'fin', e.target.value)}
                         >
-                          {heures.map(h => <option key={h} value={h}>{formatHeure(h)}</option>)}
+                          {heures.map((h) => (
+                            <option key={h} value={h}>
+                              {formatHeure(h)}
+                            </option>
+                          ))}
                         </select>
                       </div>
                     )}
@@ -518,8 +618,8 @@ export default function EmployePage() {
                     { id: 'echange', icon: '🔄', label: 'Échange' },
                     { id: 'maladie', icon: '🏥', label: 'Maladie' },
                     { id: 'autre', icon: '📋', label: 'Autre' },
-                  ].map(type => (
-                    <div 
+                  ].map((type) => (
+                    <div
                       key={type.id}
                       className={`type-option ${demandeForm.type === type.id ? 'selected' : ''}`}
                       onClick={() => setDemandeForm({ ...demandeForm, type: type.id as any })}
@@ -533,8 +633,8 @@ export default function EmployePage() {
 
               <div className="form-group">
                 <label className="form-label">Date de début</label>
-                <input 
-                  type="date" 
+                <input
+                  type="date"
                   className="form-input"
                   value={demandeForm.date_debut}
                   onChange={(e) => setDemandeForm({ ...demandeForm, date_debut: e.target.value })}
@@ -543,8 +643,8 @@ export default function EmployePage() {
 
               <div className="form-group">
                 <label className="form-label">Date de fin</label>
-                <input 
-                  type="date" 
+                <input
+                  type="date"
                   className="form-input"
                   value={demandeForm.date_fin}
                   onChange={(e) => setDemandeForm({ ...demandeForm, date_fin: e.target.value })}
@@ -558,8 +658,8 @@ export default function EmployePage() {
                     { id: 'journee', label: 'Journée' },
                     { id: 'matin', label: 'Matin' },
                     { id: 'apres-midi', label: 'Après-midi' },
-                  ].map(creneau => (
-                    <div 
+                  ].map((creneau) => (
+                    <div
                       key={creneau.id}
                       className={`creneau-option ${demandeForm.creneau === creneau.id ? 'selected' : ''}`}
                       onClick={() => setDemandeForm({ ...demandeForm, creneau: creneau.id as any })}
@@ -572,7 +672,7 @@ export default function EmployePage() {
 
               <div className="form-group">
                 <label className="form-label">Motif</label>
-                <textarea 
+                <textarea
                   className="form-input form-textarea"
                   placeholder="Expliquez brièvement la raison..."
                   value={demandeForm.motif}
@@ -582,8 +682,8 @@ export default function EmployePage() {
 
               <div className="form-group">
                 <label className="checkbox-label">
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     checked={demandeForm.urgent}
                     onChange={(e) => setDemandeForm({ ...demandeForm, urgent: e.target.checked })}
                   />
@@ -603,32 +703,36 @@ export default function EmployePage() {
           <div className="card">
             <div className="card-header card-header-green">
               <div className="card-title">📅 Mon planning</div>
-              <div className="card-subtitle">Semaine du {new Date(semaineDebut).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</div>
+              <div className="card-subtitle">
+                Semaine du {new Date(semaineDebut).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}
+              </div>
             </div>
             <div className="card-body">
               {joursLabels.map((jour, index) => {
-                const dateStr = (() => {
-                  const d = new Date(semaineDebut);
-                  d.setDate(d.getDate() + index);
-                  return d.toISOString().split('T')[0];
-                })();
-                const dayPlan = planning.find(p => p.date === dateStr);
-                
+                const d = new Date(semaineDebut)
+                d.setDate(d.getDate() + index)
+                const dateStr = d.toISOString().split('T')[0]
+
+                const dayPlan = planning.find((p) => p.date === dateStr)
+
                 return (
                   <div key={jour.key} className="planning-day">
                     <div className="planning-day-header">
-                      <span className="planning-day-name">{jour.label} {getDateForDay(index)}</span>
+                      <span className="planning-day-name">
+                        {jour.label} {getDateForDay(index)}
+                      </span>
                       <span className={`planning-badge ${dayPlan ? 'working' : 'off'}`}>
                         {dayPlan ? '✓ Travail' : 'Repos'}
                       </span>
                     </div>
+
                     {dayPlan && (
                       <div className="planning-hours">
                         🕐 {formatHeure(dayPlan.debut)} → {formatHeure(dayPlan.fin)}
                       </div>
                     )}
                   </div>
-                );
+                )
               })}
             </div>
           </div>
@@ -646,8 +750,8 @@ export default function EmployePage() {
                   <p>Aucune demande pour le moment</p>
                 </div>
               ) : (
-                demandes.map(demande => {
-                  const status = getStatusBadge(demande.status);
+                demandes.map((demande) => {
+                  const status = getStatusBadge(demande.status)
                   return (
                     <div key={demande.id} className="demande-card">
                       <div className="demande-header">
@@ -662,13 +766,13 @@ export default function EmployePage() {
                         </span>
                       </div>
                       <div className="demande-details">
-                        📅 {new Date(demande.date_debut).toLocaleDateString('fr-FR')} 
+                        📅 {new Date(demande.date_debut).toLocaleDateString('fr-FR')}
                         {demande.date_debut !== demande.date_fin && ` → ${new Date(demande.date_fin).toLocaleDateString('fr-FR')}`}
                         <br />
                         💬 {demande.motif || 'Pas de motif'}
                       </div>
                     </div>
-                  );
+                  )
                 })
               )}
             </div>
@@ -682,5 +786,5 @@ export default function EmployePage() {
         <span>{toast.message}</span>
       </div>
     </div>
-  );
+  )
 }
