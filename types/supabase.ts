@@ -26,8 +26,8 @@ export interface Database {
           siret: string | null
           horaires_ouverture: string | null
           horaires_fermeture: string | null
-          created_at: string
-          updated_at: string
+          created_at: string | null
+          updated_at: string | null
         }
         Insert: {
           id?: string
@@ -38,8 +38,8 @@ export interface Database {
           siret?: string | null
           horaires_ouverture?: string | null
           horaires_fermeture?: string | null
-          created_at?: string
-          updated_at?: string
+          created_at?: string | null
+          updated_at?: string | null
         }
         Update: {
           id?: string
@@ -50,10 +50,11 @@ export interface Database {
           siret?: string | null
           horaires_ouverture?: string | null
           horaires_fermeture?: string | null
-          created_at?: string
-          updated_at?: string
+          created_at?: string | null
+          updated_at?: string | null
         }
       }
+
       employees: {
         Row: {
           id: string
@@ -67,8 +68,8 @@ export interface Database {
           planning_type: 'fixe' | 'variable'
           actif: boolean
           date_embauche: string | null
-          created_at: string
-          updated_at: string
+          created_at: string | null
+          updated_at: string | null
         }
         Insert: {
           id?: string
@@ -82,8 +83,8 @@ export interface Database {
           planning_type?: 'fixe' | 'variable'
           actif?: boolean
           date_embauche?: string | null
-          created_at?: string
-          updated_at?: string
+          created_at?: string | null
+          updated_at?: string | null
         }
         Update: {
           id?: string
@@ -97,10 +98,11 @@ export interface Database {
           planning_type?: 'fixe' | 'variable'
           actif?: boolean
           date_embauche?: string | null
-          created_at?: string
-          updated_at?: string
+          created_at?: string | null
+          updated_at?: string | null
         }
       }
+
       weekly_schedules: {
         Row: {
           id: string
@@ -111,8 +113,8 @@ export interface Database {
           pause_start: string | null
           pause_duration: number | null
           is_active: boolean
-          created_at: string
-          updated_at: string
+          created_at: string | null
+          updated_at: string | null
         }
         Insert: {
           id?: string
@@ -123,8 +125,8 @@ export interface Database {
           pause_start?: string | null
           pause_duration?: number | null
           is_active?: boolean
-          created_at?: string
-          updated_at?: string
+          created_at?: string | null
+          updated_at?: string | null
         }
         Update: {
           id?: string
@@ -135,10 +137,11 @@ export interface Database {
           pause_start?: string | null
           pause_duration?: number | null
           is_active?: boolean
-          created_at?: string
-          updated_at?: string
+          created_at?: string | null
+          updated_at?: string | null
         }
       }
+
       availabilities: {
         Row: {
           id: string
@@ -147,8 +150,8 @@ export interface Database {
           day_of_week: number
           start_time: string
           end_time: string
-          submitted_at: string
-          created_at: string
+          submitted_at: string | null
+          created_at: string | null
         }
         Insert: {
           id?: string
@@ -157,8 +160,8 @@ export interface Database {
           day_of_week: number
           start_time: string
           end_time: string
-          submitted_at?: string
-          created_at?: string
+          submitted_at?: string | null
+          created_at?: string | null
         }
         Update: {
           id?: string
@@ -167,10 +170,11 @@ export interface Database {
           day_of_week?: number
           start_time?: string
           end_time?: string
-          submitted_at?: string
-          created_at?: string
+          submitted_at?: string | null
+          created_at?: string | null
         }
       }
+
       requests: {
         Row: {
           id: string
@@ -185,7 +189,7 @@ export interface Database {
           exchange_with_id: string | null
           replacement_id: string | null
           status: 'pending' | 'approved' | 'refused'
-          created_at: string
+          created_at: string | null
           processed_at: string | null
           processed_by: string | null
         }
@@ -202,7 +206,7 @@ export interface Database {
           exchange_with_id?: string | null
           replacement_id?: string | null
           status?: 'pending' | 'approved' | 'refused'
-          created_at?: string
+          created_at?: string | null
           processed_at?: string | null
           processed_by?: string | null
         }
@@ -219,11 +223,12 @@ export interface Database {
           exchange_with_id?: string | null
           replacement_id?: string | null
           status?: 'pending' | 'approved' | 'refused'
-          created_at?: string
+          created_at?: string | null
           processed_at?: string | null
           processed_by?: string | null
         }
       }
+
       schedule_entries: {
         Row: {
           id: string
@@ -234,8 +239,8 @@ export interface Database {
           pause_start: string | null
           pause_duration: number | null
           is_published: boolean
-          created_at: string
-          updated_at: string
+          created_at: string | null
+          updated_at: string | null
           created_by: string | null
         }
         Insert: {
@@ -247,8 +252,8 @@ export interface Database {
           pause_start?: string | null
           pause_duration?: number | null
           is_published?: boolean
-          created_at?: string
-          updated_at?: string
+          created_at?: string | null
+          updated_at?: string | null
           created_by?: string | null
         }
         Update: {
@@ -260,11 +265,12 @@ export interface Database {
           pause_start?: string | null
           pause_duration?: number | null
           is_published?: boolean
-          created_at?: string
-          updated_at?: string
+          created_at?: string | null
+          updated_at?: string | null
           created_by?: string | null
         }
       }
+
       gardes: {
         Row: {
           id: string
@@ -275,8 +281,8 @@ export interface Database {
           pharmacien_id: string | null
           accompagnant_id: string | null
           status: 'a_assigner' | 'assignee' | 'validee'
-          created_at: string
-          updated_at: string
+          created_at: string | null
+          updated_at: string | null
         }
         Insert: {
           id?: string
@@ -287,8 +293,8 @@ export interface Database {
           pharmacien_id?: string | null
           accompagnant_id?: string | null
           status?: 'a_assigner' | 'assignee' | 'validee'
-          created_at?: string
-          updated_at?: string
+          created_at?: string | null
+          updated_at?: string | null
         }
         Update: {
           id?: string
@@ -299,38 +305,55 @@ export interface Database {
           pharmacien_id?: string | null
           accompagnant_id?: string | null
           status?: 'a_assigner' | 'assignee' | 'validee'
-          created_at?: string
-          updated_at?: string
+          created_at?: string | null
+          updated_at?: string | null
         }
       }
     }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      [_ in never]: never
-    }
-    Enums: {
-      [_ in never]: never
-    }
+
+    Views: { [_ in never]: never }
+    Functions: { [_ in never]: never }
+    Enums: { [_ in never]: never }
   }
 }
 
-// Types utilitaires pour faciliter l'utilisation
+// ============================================================
+// Types utilitaires
+// ============================================================
+
 export type Pharmacy = Database['public']['Tables']['pharmacies']['Row']
+
 export type Employee = Database['public']['Tables']['employees']['Row']
 export type EmployeeInsert = Database['public']['Tables']['employees']['Insert']
 export type EmployeeUpdate = Database['public']['Tables']['employees']['Update']
-export type WeeklySchedule = Database['public']['Tables']['weekly_schedules']['Row']
-export type Availability = Database['public']['Tables']['availabilities']['Row']
-export type Request = Database['public']['Tables']['requests']['Row']
-export type ScheduleEntry = Database['public']['Tables']['schedule_entries']['Row']
-export type Garde = Database['public']['Tables']['gardes']['Row']
 
-// Types pour les rôles
-export type EmployeeRole = 'Pharmacien' | 'Preparateur' | 'Apprenti' | 'Etudiant' | 'Conditionneur'
-export type PlanningType = 'fixe' | 'variable'
-export type RequestType = 'conge' | 'echange' | 'maladie'
-export type RequestStatus = 'pending' | 'approved' | 'refused'
-export type GardeType = 'soir' | 'nuit' | 'dimanche'
-export type GardeStatus = 'a_assigner' | 'assignee' | 'validee'
+export type WeeklySchedule = Database['public']['Tables']['weekly_schedules']['Row']
+export type WeeklyScheduleInsert = Database['public']['Tables']['weekly_schedules']['Insert']
+export type WeeklyScheduleUpdate = Database['public']['Tables']['weekly_schedules']['Update']
+
+export type Availability = Database['public']['Tables']['availabilities']['Row']
+export type AvailabilityInsert = Database['public']['Tables']['availabilities']['Insert']
+export type AvailabilityUpdate = Database['public']['Tables']['availabilities']['Update']
+
+export type Request = Database['public']['Tables']['requests']['Row']
+export type RequestInsert = Database['public']['Tables']['requests']['Insert']
+export type RequestUpdate = Database['public']['Tables']['requests']['Update']
+
+export type ScheduleEntry = Database['public']['Tables']['schedule_entries']['Row']
+export type ScheduleEntryInsert = Database['public']['Tables']['schedule_entries']['Insert']
+export type ScheduleEntryUpdate = Database['public']['Tables']['schedule_entries']['Update']
+
+export type Garde = Database['public']['Tables']['gardes']['Row']
+export type GardeInsert = Database['public']['Tables']['gardes']['Insert']
+export type GardeUpdate = Database['public']['Tables']['gardes']['Update']
+
+// ============================================================
+// Enums / Alias
+// ============================================================
+
+export type EmployeeRole = Employee['role']
+export type PlanningType = Employee['planning_type']
+export type RequestType = Request['type']
+export type RequestStatus = Request['status']
+export type GardeType = Garde['type']
+export type GardeStatus = Garde['status']
