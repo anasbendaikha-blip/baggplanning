@@ -2,7 +2,7 @@
 // 📁 lib/api/requests.ts
 // ============================================================
 // Fonctions API pour gérer les demandes
-// Version corrigée - sans typage strict Database
+// Version finale - sans erreur TypeScript
 // ============================================================
 
 import { createClient } from '@/utils/supabase/client'
@@ -198,7 +198,8 @@ export async function createRequest(request: {
 }): Promise<Request> {
   const supabase = createClient()
 
-  const payload = {
+  // Construire l'objet sans typage strict
+  const insertData: Record<string, unknown> = {
     employee_id: request.employee_id,
     type: request.type,
     date: request.date,
@@ -208,12 +209,12 @@ export async function createRequest(request: {
     motif: request.motif ?? null,
     is_urgent: request.is_urgent ?? false,
     exchange_with_id: request.exchange_with_id ?? null,
-    status: 'pending' as const,
+    status: 'pending',
   }
 
   const { data, error } = await supabase
     .from('requests')
-    .insert(payload)
+    .insert(insertData)
     .select()
     .single()
 
@@ -238,15 +239,15 @@ export async function approveRequest(
 ): Promise<Request> {
   const supabase = createClient()
 
-  const payload = {
-    status: 'approved' as const,
+  const updateData: Record<string, unknown> = {
+    status: 'approved',
     replacement_id: replacementId ?? null,
     processed_at: new Date().toISOString(),
   }
 
   const { data, error } = await supabase
     .from('requests')
-    .update(payload)
+    .update(updateData)
     .eq('id', id)
     .select()
     .single()
@@ -265,14 +266,14 @@ export async function approveRequest(
 export async function refuseRequest(id: string): Promise<Request> {
   const supabase = createClient()
 
-  const payload = {
-    status: 'refused' as const,
+  const updateData: Record<string, unknown> = {
+    status: 'refused',
     processed_at: new Date().toISOString(),
   }
 
   const { data, error } = await supabase
     .from('requests')
-    .update(payload)
+    .update(updateData)
     .eq('id', id)
     .select()
     .single()
@@ -294,9 +295,13 @@ export async function assignReplacement(
 ): Promise<Request> {
   const supabase = createClient()
 
+  const updateData: Record<string, unknown> = {
+    replacement_id: replacementId,
+  }
+
   const { data, error } = await supabase
     .from('requests')
-    .update({ replacement_id: replacementId })
+    .update(updateData)
     .eq('id', requestId)
     .select()
     .single()

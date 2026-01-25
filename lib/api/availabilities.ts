@@ -2,13 +2,13 @@
 // 📁 lib/api/availabilities.ts
 // ============================================================
 // Fonctions API pour gérer les disponibilités (table: availabilities)
-// Version corrigée - sans erreur TypeScript
+// Compatible avec client Supabase non typé
 // ============================================================
 
 import { createClient } from '@/utils/supabase/client'
 
 // ============================================================
-// TYPES LOCAUX (alignés avec le schéma SQL)
+// TYPES LOCAUX
 // ============================================================
 
 export type StudentRow = {
@@ -47,15 +47,15 @@ export interface WeekAvailability {
 // LECTURE
 // ============================================================
 
-/**
- * Récupérer les disponibilités pour une semaine donnée
- */
-export async function getAvailabilitiesForWeek(weekStart: string): Promise<AvailabilityWithEmployee[]> {
+export async function getAvailabilitiesForWeek(
+  weekStart: string
+): Promise<AvailabilityWithEmployee[]> {
   const supabase = createClient()
 
   const { data, error } = await supabase
     .from('availabilities')
-    .select(`
+    .select(
+      `
       id,
       employee_id,
       week_start,
@@ -65,7 +65,8 @@ export async function getAvailabilitiesForWeek(weekStart: string): Promise<Avail
       submitted_at,
       created_at,
       employee:employees(id, prenom, nom, initiales)
-    `)
+    `
+    )
     .eq('week_start', weekStart)
     .order('day_of_week', { ascending: true })
     .order('start_time', { ascending: true })
@@ -75,12 +76,9 @@ export async function getAvailabilitiesForWeek(weekStart: string): Promise<Avail
     throw new Error(error.message)
   }
 
-  return (data ?? []) as unknown as AvailabilityWithEmployee[]
+  return (data ?? []) as AvailabilityWithEmployee[]
 }
 
-/**
- * Récupérer les disponibilités d'un étudiant pour une semaine
- */
 export async function getStudentAvailabilities(
   employeeId: string,
   weekStart: string
@@ -89,7 +87,8 @@ export async function getStudentAvailabilities(
 
   const { data, error } = await supabase
     .from('availabilities')
-    .select(`
+    .select(
+      `
       id,
       employee_id,
       week_start,
@@ -98,7 +97,8 @@ export async function getStudentAvailabilities(
       end_time,
       submitted_at,
       created_at
-    `)
+    `
+    )
     .eq('employee_id', employeeId)
     .eq('week_start', weekStart)
     .order('day_of_week', { ascending: true })
@@ -109,16 +109,15 @@ export async function getStudentAvailabilities(
     throw new Error(error.message)
   }
 
-  return (data ?? []) as unknown as AvailabilityRow[]
+  return (data ?? []) as AvailabilityRow[]
 }
 
-/**
- * Matrice des disponibilités pour la vue titulaire
- */
-export async function getAvailabilityMatrix(weekStart: string): Promise<WeekAvailability[]> {
+export async function getAvailabilityMatrix(
+  weekStart: string
+): Promise<WeekAvailability[]> {
   const supabase = createClient()
 
-  // 1) Récupérer tous les étudiants actifs
+  // 1) Étudiants actifs
   const { data: studentsRaw, error: studentsError } = await supabase
     .from('employees')
     .select('id, prenom, nom, initiales')
@@ -131,12 +130,13 @@ export async function getAvailabilityMatrix(weekStart: string): Promise<WeekAvai
     throw new Error(studentsError.message)
   }
 
-  const students = (studentsRaw ?? []) as unknown as StudentRow[]
+  const students = (studentsRaw ?? []) as StudentRow[]
 
-  // 2) Récupérer les disponibilités de la semaine
+  // 2) Disponibilités de la semaine
   const { data: availsRaw, error: availError } = await supabase
     .from('availabilities')
-    .select(`
+    .select(
+      `
       id,
       employee_id,
       week_start,
@@ -145,7 +145,8 @@ export async function getAvailabilityMatrix(weekStart: string): Promise<WeekAvai
       end_time,
       submitted_at,
       created_at
-    `)
+    `
+    )
     .eq('week_start', weekStart)
 
   if (availError) {
@@ -153,11 +154,13 @@ export async function getAvailabilityMatrix(weekStart: string): Promise<WeekAvai
     throw new Error(availError.message)
   }
 
-  const availabilities = (availsRaw ?? []) as unknown as AvailabilityRow[]
+  const availabilities = (availsRaw ?? []) as AvailabilityRow[]
 
   // 3) Construire la matrice
   const matrix: WeekAvailability[] = students.map((student) => {
-    const studentAvail = availabilities.filter((a) => a.employee_id === student.id)
+    const studentAvail = availabilities.filter(
+      (a) => a.employee_id === student.id
+    )
 
     const days: WeekAvailability['days'] = {}
     for (let d = 0; d <= 5; d++) {
@@ -173,7 +176,9 @@ export async function getAvailabilityMatrix(weekStart: string): Promise<WeekAvai
 
     return {
       employee_id: student.id,
-      employee_name: student.nom ? `${student.prenom} ${student.nom}` : student.prenom,
+      employee_name: student.nom
+        ? `${student.prenom} ${student.nom}`
+        : student.prenom,
       initiales: student.initiales,
       days,
       has_submitted: studentAvail.length > 0,
@@ -183,9 +188,6 @@ export async function getAvailabilityMatrix(weekStart: string): Promise<WeekAvai
   return matrix
 }
 
-/**
- * Récupérer les étudiants disponibles pour un jour donné
- */
 export async function getAvailableStudentsForDay(
   weekStart: string,
   dayOfWeek: number
@@ -194,7 +196,8 @@ export async function getAvailableStudentsForDay(
 
   const { data, error } = await supabase
     .from('availabilities')
-    .select(`
+    .select(
+      `
       id,
       employee_id,
       week_start,
@@ -204,7 +207,8 @@ export async function getAvailableStudentsForDay(
       submitted_at,
       created_at,
       employee:employees(id, prenom, nom, initiales)
-    `)
+    `
+    )
     .eq('week_start', weekStart)
     .eq('day_of_week', dayOfWeek)
     .order('start_time', { ascending: true })
@@ -214,17 +218,13 @@ export async function getAvailableStudentsForDay(
     throw new Error(error.message)
   }
 
-  return (data ?? []) as unknown as AvailabilityWithEmployee[]
+  return (data ?? []) as AvailabilityWithEmployee[]
 }
 
 // ============================================================
 // CRÉATION / MISE À JOUR
 // ============================================================
 
-/**
- * Soumettre les disponibilités d'un étudiant pour une semaine
- * (Supprime les anciennes et insère les nouvelles)
- */
 export async function submitAvailabilities(
   employeeId: string,
   weekStart: string,
@@ -232,7 +232,7 @@ export async function submitAvailabilities(
 ): Promise<void> {
   const supabase = createClient()
 
-  // 1) Supprimer les anciennes disponibilités pour cette semaine
+  // 1) Supprimer les anciennes disponibilités
   const { error: deleteError } = await supabase
     .from('availabilities')
     .delete()
@@ -244,12 +244,12 @@ export async function submitAvailabilities(
     throw new Error(deleteError.message)
   }
 
-  // 2) Si pas de nouveaux slots, on s'arrête là
+  // 2) Si pas de nouveaux slots, on s'arrête
   if (!slots || slots.length === 0) {
     return
   }
 
-  // 3) Préparer les données à insérer
+  // 3) Préparer et insérer les nouvelles disponibilités
   const rowsToInsert = slots.map((s) => ({
     employee_id: employeeId,
     week_start: weekStart,
@@ -258,10 +258,9 @@ export async function submitAvailabilities(
     end_time: normalizeTime(s.end_time),
   }))
 
-  // 4) Insérer les nouvelles disponibilités
   const { error: insertError } = await supabase
     .from('availabilities')
-    .insert(rowsToInsert as any)
+    .insert(rowsToInsert)
 
   if (insertError) {
     console.error('Erreur insertion nouvelles dispos:', insertError)
@@ -273,9 +272,6 @@ export async function submitAvailabilities(
 // SUPPRESSION
 // ============================================================
 
-/**
- * Supprimer une disponibilité par son ID
- */
 export async function deleteAvailability(id: string): Promise<void> {
   const supabase = createClient()
 
@@ -294,9 +290,6 @@ export async function deleteAvailability(id: string): Promise<void> {
 // STATISTIQUES
 // ============================================================
 
-/**
- * Compter les réponses pour une semaine
- */
 export async function getAvailabilityStats(weekStart: string): Promise<{
   total_students: number
   submitted: number
@@ -305,7 +298,7 @@ export async function getAvailabilityStats(weekStart: string): Promise<{
 }> {
   const supabase = createClient()
 
-  // Compter le nombre total d'étudiants actifs
+  // Compter les étudiants actifs
   const { count: totalStudents, error: countError } = await supabase
     .from('employees')
     .select('*', { count: 'exact', head: true })
@@ -317,7 +310,7 @@ export async function getAvailabilityStats(weekStart: string): Promise<{
     throw new Error(countError.message)
   }
 
-  // Récupérer les employee_id qui ont soumis des dispos cette semaine
+  // Récupérer les soumissions
   const { data: submittedRaw, error: submittedError } = await supabase
     .from('availabilities')
     .select('employee_id')
@@ -328,9 +321,8 @@ export async function getAvailabilityStats(weekStart: string): Promise<{
     throw new Error(submittedError.message)
   }
 
-  // Compter les étudiants uniques qui ont soumis
-  const submittedData = (submittedRaw ?? []) as Array<{ employee_id: string | null }>
-  const uniqueSubmitted = new Set(submittedData.map((d) => d.employee_id).filter(Boolean)).size
+  const submittedData = (submittedRaw ?? []) as Array<{ employee_id: string }>
+  const uniqueSubmitted = new Set(submittedData.map((d) => d.employee_id)).size
 
   const total = totalStudents ?? 0
   const pending = Math.max(0, total - uniqueSubmitted)
@@ -348,9 +340,6 @@ export async function getAvailabilityStats(weekStart: string): Promise<{
 // UTILITAIRES
 // ============================================================
 
-/**
- * Obtenir le lundi de la semaine courante (format YYYY-MM-DD)
- */
 export function getCurrentWeekStart(): string {
   const now = new Date()
   const day = now.getDay()
@@ -359,27 +348,16 @@ export function getCurrentWeekStart(): string {
   return monday.toISOString().split('T')[0]
 }
 
-/**
- * Formater une heure pour l'affichage (ex: "14:00" -> "14h")
- */
 export function formatTime(time: string): string {
   const t = normalizeTime(time)
   const [hours, minutes] = t.split(':')
   return `${hours}h${minutes === '00' ? '' : minutes}`
 }
 
-/**
- * Formater un créneau pour l'affichage (ex: "14h-18h")
- */
 export function formatTimeSlot(start: string, end: string): string {
   return `${formatTime(start)}-${formatTime(end)}`
 }
 
-/**
- * Normaliser le format de l'heure
- * "08:00:00" -> "08:00"
- * "8:00" -> "08:00"
- */
 function normalizeTime(time: string): string {
   if (!time) return '00:00'
   const parts = time.split(':')

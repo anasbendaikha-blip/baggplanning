@@ -1,66 +1,84 @@
-"use client";
+'use client'
 
-import { createContext, useContext, useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
-import type { User } from '@supabase/supabase-js';
-import type { ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 
-interface AuthContextType {
-  user: User | null;
-  loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signOut: () => Promise<void>;
+type Role = 'titulaire' | 'employe'
+
+export type MockUser = {
+  role: Role
+  employeeName?: string
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+type AuthContextValue = {
+  user: MockUser | null
+  loading: boolean
+  loginAsTitulaire: () => void
+  loginAsEmploye: (employeeName: string) => void
+  logout: () => void
+}
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+const AuthContext = createContext<AuthContextValue | undefined>(undefined)
+
+const COOKIE_NAME = 'bp_auth' // BaggPlanning Auth
+
+function setCookie(name: string, value: string, days = 7) {
+  const expires = new Date(Date.now() + days * 864e5).toUTCString()
+  document.cookie = `${name}=${encodeURIComponent(value)}; Expires=${expires}; Path=/; SameSite=Lax`
+}
+
+function deleteCookie(name: string) {
+  document.cookie = `${name}=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Lax`
+}
+
+function readLocalUser(): MockUser | null {
+  try {
+    const raw = localStorage.getItem('bp_user')
+    return raw ? (JSON.parse(raw) as MockUser) : null
+  } catch {
+    return null
+  }
+}
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<MockUser | null>(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setUser(session?.user ?? null);
-      setLoading(false);
-    };
+    // Hydrate depuis localStorage au 1er chargement
+    const u = readLocalUser()
+    setUser(u)
+    setLoading(false)
+  }, [])
 
-    getSession();
+  const value = useMemo<AuthContextValue>(() => {
+    return {
+      user,
+      loading,
+      loginAsTitulaire: () => {
+        const u: MockUser = { role: 'titulaire' }
+        localStorage.setItem('bp_user', JSON.stringify(u))
+        setCookie(COOKIE_NAME, JSON.stringify(u))
+        setUser(u)
+      },
+      loginAsEmploye: (employeeName: string) => {
+        const u: MockUser = { role: 'employe', employeeName }
+        localStorage.setItem('bp_user', JSON.stringify(u))
+        setCookie(COOKIE_NAME, JSON.stringify(u))
+        setUser(u)
+      },
+      logout: () => {
+        localStorage.removeItem('bp_user')
+        deleteCookie(COOKIE_NAME)
+        setUser(null)
+      },
+    }
+  }, [user])
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    return { error };
-  };
-
-  const signOut = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
+  const ctx = useContext(AuthContext)
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider')
+  return ctx
 }

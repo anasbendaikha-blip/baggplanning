@@ -35,19 +35,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="fr">
-      <head>
-        <link rel="manifest" href="/manifest.json" />
-        <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        <meta name="apple-mobile-web-app-title" content="BaggPlanning" />
-        <meta name="mobile-web-app-capable" content="yes" />
-      </head>
-      <body>
-        <AuthProvider>
-          {children}
-        </AuthProvider>
+    <html lang="fr" suppressHydrationWarning>
+      <body suppressHydrationWarning>
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );

@@ -1,24 +1,23 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getEmployees, getEmployeesByRole } from '@/lib/api/employees'
-import { createRequest, getPendingRequests, deleteRequest } from '@/lib/api/requests'
-import { getAvailabilityStats, getCurrentWeekStart } from '@/lib/api/availabilities'
+import { createClient } from '@/utils/supabase/client'
 
 // ============================================================
-// PAGE DE TEST SUPABASE
+// PAGE DE TEST SUPABASE - VERSION SIMPLIFIÉE
 // ============================================================
-// Cette page permet de valider que toutes les opérations
-// CRUD fonctionnent correctement avec Supabase
+// Cette page teste directement Supabase sans dépendre des
+// fichiers lib/api/* (pour isoler les problèmes)
 // ============================================================
 
 export default function TestSupabasePage() {
   const [logs, setLogs] = useState<string[]>([])
   const [employees, setEmployees] = useState<any[]>([])
   const [requests, setRequests] = useState<any[]>([])
-  const [stats, setStats] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [testRequestId, setTestRequestId] = useState<string | null>(null)
+
+  const supabase = createClient()
 
   // Ajouter un log
   const addLog = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -31,66 +30,113 @@ export default function TestSupabasePage() {
   const testReadEmployees = async () => {
     try {
       addLog('Test lecture employés...', 'info')
-      const data = await getEmployees()
-      setEmployees(data)
-      addLog(`Lecture OK: ${data.length} employés trouvés`, 'success')
-      return data
+      
+      const { data, error } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('actif', true)
+        .order('role')
+        .order('prenom')
+
+      if (error) throw error
+
+      setEmployees(data || [])
+      addLog(`Lecture OK: ${data?.length || 0} employés trouvés`, 'success')
+      return data || []
     } catch (err: any) {
       addLog(`Lecture employés: ${err.message}`, 'error')
       return []
     }
   }
 
-  // Test 2: Lire les employés par rôle
-  const testReadByRole = async () => {
+  // Test 2: Lire les étudiants
+  const testReadEtudiants = async () => {
     try {
       addLog('Test lecture étudiants...', 'info')
-      const etudiants = await getEmployeesByRole('Etudiant')
-      addLog(`Lecture OK: ${etudiants.length} étudiants trouvés`, 'success')
       
-      addLog('Test lecture pharmaciens...', 'info')
-      const pharmaciens = await getEmployeesByRole('Pharmacien')
-      addLog(`Lecture OK: ${pharmaciens.length} pharmaciens trouvés`, 'success')
+      const { data, error } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('role', 'Etudiant')
+        .eq('actif', true)
+
+      if (error) throw error
+
+      addLog(`Lecture OK: ${data?.length || 0} étudiants trouvés`, 'success')
     } catch (err: any) {
-      addLog(`Lecture par rôle: ${err.message}`, 'error')
+      addLog(`Lecture étudiants: ${err.message}`, 'error')
     }
   }
 
-  // Test 3: Créer une demande
+  // Test 3: Lire les pharmaciens
+  const testReadPharmaciens = async () => {
+    try {
+      addLog('Test lecture pharmaciens...', 'info')
+      
+      const { data, error } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('role', 'Pharmacien')
+        .eq('actif', true)
+
+      if (error) throw error
+
+      addLog(`Lecture OK: ${data?.length || 0} pharmaciens trouvés`, 'success')
+    } catch (err: any) {
+      addLog(`Lecture pharmaciens: ${err.message}`, 'error')
+    }
+  }
+
+  // Test 4: Créer une demande
   const testCreateRequest = async (employeeId: string) => {
     try {
       addLog('Test création demande (congé)...', 'info')
       
-      const newRequest = await createRequest({
-        employee_id: employeeId,
-        type: 'conge',
-        date: '2026-02-15',
-        motif: '🧪 Test automatique - ' + new Date().toISOString(),
-        is_urgent: false,
-      })
-      
-      setTestRequestId(newRequest.id)
-      addLog(`Création OK: demande ${newRequest.id.slice(0, 8)}...`, 'success')
-      return newRequest
+      const { data, error } = await supabase
+        .from('requests')
+        .insert({
+          employee_id: employeeId,
+          type: 'conge',
+          date: '2026-02-15',
+          motif: '🧪 Test automatique - ' + new Date().toISOString(),
+          is_urgent: false,
+          status: 'pending',
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+
+      setTestRequestId(data.id)
+      addLog(`Création OK: demande ${data.id.slice(0, 8)}...`, 'success')
+      return data
     } catch (err: any) {
       addLog(`Création demande: ${err.message}`, 'error')
       return null
     }
   }
 
-  // Test 4: Lire les demandes
+  // Test 5: Lire les demandes
   const testReadRequests = async () => {
     try {
-      addLog('Test lecture demandes en attente...', 'info')
-      const data = await getPendingRequests()
-      setRequests(data)
-      addLog(`Lecture OK: ${data.length} demandes en attente`, 'success')
+      addLog('Test lecture demandes...', 'info')
+      
+      const { data, error } = await supabase
+        .from('requests')
+        .select('*')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+
+      setRequests(data || [])
+      addLog(`Lecture OK: ${data?.length || 0} demandes en attente`, 'success')
     } catch (err: any) {
       addLog(`Lecture demandes: ${err.message}`, 'error')
     }
   }
 
-  // Test 5: Supprimer la demande de test
+  // Test 6: Supprimer la demande de test
   const testDeleteRequest = async () => {
     if (!testRequestId) {
       addLog('Pas de demande de test à supprimer', 'info')
@@ -99,7 +145,14 @@ export default function TestSupabasePage() {
     
     try {
       addLog('Test suppression demande...', 'info')
-      await deleteRequest(testRequestId)
+      
+      const { error } = await supabase
+        .from('requests')
+        .delete()
+        .eq('id', testRequestId)
+
+      if (error) throw error
+
       setTestRequestId(null)
       addLog('Suppression OK', 'success')
       
@@ -110,16 +163,42 @@ export default function TestSupabasePage() {
     }
   }
 
-  // Test 6: Stats disponibilités
+  // Test 7: Stats disponibilités
   const testAvailabilityStats = async () => {
     try {
       addLog('Test stats disponibilités...', 'info')
-      const weekStart = getCurrentWeekStart()
-      addLog(`Semaine: ${weekStart}`, 'info')
       
-      const statsData = await getAvailabilityStats(weekStart)
-      setStats(statsData)
-      addLog(`Stats OK: ${statsData.submitted}/${statsData.total_students} réponses (${statsData.rate}%)`, 'success')
+      // Compter les étudiants
+      const { count: totalStudents, error: countError } = await supabase
+        .from('employees')
+        .select('*', { count: 'exact', head: true })
+        .eq('role', 'Etudiant')
+        .eq('actif', true)
+
+      if (countError) throw countError
+
+      // Calculer le lundi de cette semaine
+      const now = new Date()
+      const day = now.getDay()
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1)
+      const monday = new Date(now.setDate(diff))
+      const weekStart = monday.toISOString().split('T')[0]
+
+      addLog(`Semaine: ${weekStart}`, 'info')
+
+      // Compter les soumissions
+      const { data: availData, error: availError } = await supabase
+        .from('availabilities')
+        .select('employee_id')
+        .eq('week_start', weekStart)
+
+      if (availError) throw availError
+
+      const uniqueSubmitted = new Set(availData?.map(d => d.employee_id)).size
+      const total = totalStudents || 0
+      const rate = total > 0 ? Math.round((uniqueSubmitted / total) * 100) : 0
+
+      addLog(`Stats OK: ${uniqueSubmitted}/${total} réponses (${rate}%)`, 'success')
     } catch (err: any) {
       addLog(`Stats disponibilités: ${err.message}`, 'error')
     }
@@ -134,20 +213,23 @@ export default function TestSupabasePage() {
     // Test 1: Lecture employés
     const emps = await testReadEmployees()
 
-    // Test 2: Lecture par rôle
-    await testReadByRole()
+    // Test 2: Lecture étudiants
+    await testReadEtudiants()
 
-    // Test 3: Création demande (si on a des employés)
+    // Test 3: Lecture pharmaciens
+    await testReadPharmaciens()
+
+    // Test 4: Création demande (si on a des employés)
     if (emps.length > 0) {
       await testCreateRequest(emps[0].id)
     } else {
       addLog('Pas d\'employés pour tester la création', 'error')
     }
 
-    // Test 4: Lecture demandes
+    // Test 5: Lecture demandes
     await testReadRequests()
 
-    // Test 5: Stats disponibilités
+    // Test 6: Stats disponibilités
     await testAvailabilityStats()
 
     addLog('=== FIN DES TESTS ===', 'info')
@@ -176,11 +258,11 @@ export default function TestSupabasePage() {
       </h1>
       
       <p style={{ color: '#64748b', marginBottom: '24px' }}>
-        Cette page valide que toutes les opérations CRUD fonctionnent correctement.
+        Cette page teste directement Supabase (sans passer par lib/api).
       </p>
 
       {/* Boutons d'action */}
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', flexWrap: 'wrap' }}>
         <button
           onClick={runAllTests}
           disabled={isLoading}
@@ -219,7 +301,7 @@ export default function TestSupabasePage() {
       {/* Grille de résultats */}
       <div style={{ 
         display: 'grid', 
-        gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
         gap: '20px',
         marginBottom: '24px'
       }}>
@@ -229,7 +311,8 @@ export default function TestSupabasePage() {
           backgroundColor: '#1e293b',
           borderRadius: '12px',
           padding: '16px',
-          color: '#e2e8f0'
+          color: '#e2e8f0',
+          gridColumn: 'span 2'
         }}>
           <h2 style={{ fontSize: '16px', marginBottom: '12px', color: '#94a3b8' }}>
             📋 Logs des tests
@@ -237,7 +320,7 @@ export default function TestSupabasePage() {
           <div style={{ 
             fontFamily: 'monospace', 
             fontSize: '12px',
-            maxHeight: '300px',
+            maxHeight: '250px',
             overflowY: 'auto'
           }}>
             {logs.map((log, i) => (
@@ -257,38 +340,50 @@ export default function TestSupabasePage() {
           <h2 style={{ fontSize: '16px', marginBottom: '12px', color: '#1e293b' }}>
             👥 Employés ({employees.length})
           </h2>
-          <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-            {employees.slice(0, 10).map((emp) => (
+          <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+            {employees.slice(0, 8).map((emp) => (
               <div 
                 key={emp.id} 
                 style={{ 
-                  padding: '8px',
+                  padding: '6px 8px',
                   marginBottom: '4px',
                   backgroundColor: '#f8fafc',
                   borderRadius: '6px',
-                  fontSize: '13px'
+                  fontSize: '13px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
                 }}
               >
-                <strong>{emp.initiales}</strong> - {emp.prenom} {emp.nom || ''} 
-                <span style={{ 
-                  marginLeft: '8px',
-                  padding: '2px 8px',
+                <span style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '6px',
                   backgroundColor: getRoleColor(emp.role),
                   color: 'white',
-                  borderRadius: '4px',
-                  fontSize: '11px'
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '11px',
+                  fontWeight: 'bold'
                 }}>
-                  {emp.role}
+                  {emp.initiales}
                 </span>
+                <div>
+                  <div style={{ fontWeight: '500' }}>{emp.prenom} {emp.nom || ''}</div>
+                  <div style={{ fontSize: '11px', color: '#64748b' }}>{emp.role}</div>
+                </div>
               </div>
             ))}
-            {employees.length > 10 && (
-              <div style={{ color: '#64748b', fontSize: '12px', marginTop: '8px' }}>
-                ... et {employees.length - 10} autres
+            {employees.length > 8 && (
+              <div style={{ color: '#64748b', fontSize: '12px', marginTop: '8px', textAlign: 'center' }}>
+                + {employees.length - 8} autres
               </div>
             )}
             {employees.length === 0 && (
-              <div style={{ color: '#ef4444' }}>Aucun employé trouvé</div>
+              <div style={{ color: '#ef4444', textAlign: 'center', padding: '20px' }}>
+                ⚠️ Aucun employé trouvé
+              </div>
             )}
           </div>
         </div>
@@ -301,9 +396,9 @@ export default function TestSupabasePage() {
           border: '1px solid #e2e8f0'
         }}>
           <h2 style={{ fontSize: '16px', marginBottom: '12px', color: '#1e293b' }}>
-            📋 Demandes en attente ({requests.length})
+            📋 Demandes ({requests.length})
           </h2>
-          <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+          <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
             {requests.map((req) => (
               <div 
                 key={req.id} 
@@ -315,40 +410,31 @@ export default function TestSupabasePage() {
                   fontSize: '13px'
                 }}
               >
-                <strong>{req.type}</strong> - {req.date}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{
+                    padding: '2px 8px',
+                    backgroundColor: getRequestColor(req.type),
+                    color: 'white',
+                    borderRadius: '4px',
+                    fontSize: '11px'
+                  }}>
+                    {req.type}
+                  </span>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>{req.date}</span>
+                </div>
                 {req.motif && (
                   <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
-                    {req.motif.slice(0, 50)}...
+                    {req.motif.length > 40 ? req.motif.slice(0, 40) + '...' : req.motif}
                   </div>
                 )}
               </div>
             ))}
             {requests.length === 0 && (
-              <div style={{ color: '#64748b' }}>Aucune demande en attente</div>
+              <div style={{ color: '#64748b', textAlign: 'center', padding: '20px' }}>
+                Aucune demande
+              </div>
             )}
           </div>
-        </div>
-
-        {/* Card: Stats */}
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '12px',
-          padding: '16px',
-          border: '1px solid #e2e8f0'
-        }}>
-          <h2 style={{ fontSize: '16px', marginBottom: '12px', color: '#1e293b' }}>
-            📊 Stats Disponibilités
-          </h2>
-          {stats ? (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              <StatBox label="Total étudiants" value={stats.total_students} color="#3b82f6" />
-              <StatBox label="Ont répondu" value={stats.submitted} color="#10b981" />
-              <StatBox label="En attente" value={stats.pending} color="#f59e0b" />
-              <StatBox label="Taux" value={`${stats.rate}%`} color="#8b5cf6" />
-            </div>
-          ) : (
-            <div style={{ color: '#64748b' }}>Chargement...</div>
-          )}
         </div>
       </div>
 
@@ -366,29 +452,18 @@ export default function TestSupabasePage() {
         }}>
           {logs.some(l => l.includes('❌')) 
             ? '⚠️ Certains tests ont échoué' 
-            : '✅ Tous les tests sont passés !'}
+            : isLoading 
+              ? '⏳ Tests en cours...'
+              : '✅ Tous les tests sont passés !'}
         </h2>
-        <p style={{ fontSize: '14px', color: '#64748b' }}>
+        <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>
           {logs.some(l => l.includes('❌')) 
             ? 'Vérifie les logs ci-dessus pour identifier les problèmes.'
-            : 'Ta connexion Supabase fonctionne parfaitement. Tu peux passer à la suite !'}
+            : isLoading
+              ? 'Patiente quelques secondes...'
+              : 'Ta connexion Supabase fonctionne parfaitement. Tu peux passer à la suite !'}
         </p>
       </div>
-    </div>
-  )
-}
-
-// Composant StatBox
-function StatBox({ label, value, color }: { label: string; value: string | number; color: string }) {
-  return (
-    <div style={{
-      padding: '12px',
-      backgroundColor: '#f8fafc',
-      borderRadius: '8px',
-      textAlign: 'center'
-    }}>
-      <div style={{ fontSize: '24px', fontWeight: 'bold', color }}>{value}</div>
-      <div style={{ fontSize: '12px', color: '#64748b' }}>{label}</div>
     </div>
   )
 }
@@ -403,4 +478,14 @@ function getRoleColor(role: string): string {
     Conditionneur: '#6366f1',
   }
   return colors[role] || '#64748b'
+}
+
+// Couleur par type de demande
+function getRequestColor(type: string): string {
+  const colors: Record<string, string> = {
+    conge: '#3b82f6',
+    echange: '#8b5cf6',
+    maladie: '#ef4444',
+  }
+  return colors[type] || '#64748b'
 }

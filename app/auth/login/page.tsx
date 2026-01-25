@@ -1,220 +1,268 @@
-"use client";
+'use client'
 
-import { Suspense, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { MOCK_EMPLOYEES } from '@/lib/mock-data'
 
-// Composant interne qui utilise useSearchParams
-function LoginForm() {
-  const searchParams = useSearchParams();
+export default function LoginPage() {
+  const router = useRouter()
+  const [role, setRole] = useState<'employe' | 'titulaire'>('employe')
+  const [selectedEmployee, setSelectedEmployee] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  const redirectTo = useMemo(() => {
-    const r = searchParams.get("redirect");
-    if (r && r.startsWith("/")) return r;
-    return null;
-  }, [searchParams]);
+  // Filtrer les employés selon le rôle
+  const employees = role === 'titulaire' 
+    ? MOCK_EMPLOYEES.filter(e => e.fonction === 'Pharmacien' && e.actif)
+    : MOCK_EMPLOYEES.filter(e => e.actif)
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
-
-    try {
-      const { data: authData, error: authError } =
-        await supabase.auth.signInWithPassword({ email, password });
-
-      if (authError) {
-        setError(authError.message);
-        setLoading(false);
-        return;
-      }
-
-      if (!authData.user) {
-        setError("Erreur de connexion");
-        setLoading(false);
-        return;
-      }
-
-      if (redirectTo) {
-        window.location.href = redirectTo;
-        return;
-      }
-
-      const { data: userData } = await supabase
-        .from("users")
-        .select("user_type")
-        .eq("id", authData.user.id)
-        .single();
-
-      const target = userData?.user_type === "titulaire" ? "/titulaire" : "/employe";
-      window.location.href = target;
-    } catch (err) {
-      console.error("Login error:", err);
-      setError("Une erreur est survenue");
-      setLoading(false);
+  const handleLogin = () => {
+    if (role === 'employe' && !selectedEmployee) {
+      alert('Veuillez sélectionner un employé')
+      return
     }
-  };
 
-  const fillDemo = (demoEmail: string, demoPassword: string) => {
-    setEmail(demoEmail);
-    setPassword(demoPassword);
-    setError("");
-  };
+    setLoading(true)
+
+    // Stocker la session dans localStorage
+    const session = {
+      role,
+      employeeId: role === 'titulaire' ? 'titulaire' : selectedEmployee,
+      employeeName: role === 'titulaire' 
+        ? 'Isabelle MAURER (Titulaire)' 
+        : MOCK_EMPLOYEES.find(e => e.id === selectedEmployee)?.prenom + ' ' + MOCK_EMPLOYEES.find(e => e.id === selectedEmployee)?.nom,
+      loginTime: new Date().toISOString(),
+    }
+
+    localStorage.setItem('baggplanning_session', JSON.stringify(session))
+
+    // Rediriger vers la bonne interface
+    setTimeout(() => {
+      if (role === 'titulaire') {
+        router.push('/titulaire')
+      } else {
+        router.push('/employe')
+      }
+    }, 500)
+  }
 
   return (
-    <div className="login-card">
-      <form onSubmit={handleLogin}>
-        {error && (
-          <div className="error-message">
-            <span>⚠️</span>
-            <span>{error}</span>
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+      padding: '20px',
+    }}>
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: '20px',
+        padding: '40px',
+        width: '100%',
+        maxWidth: '420px',
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+      }}>
+        {/* Logo */}
+        <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+          <div style={{
+            width: '64px',
+            height: '64px',
+            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+            borderRadius: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 16px auto',
+            fontSize: '28px',
+          }}>
+            📅
+          </div>
+          <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#1e293b', margin: '0 0 8px 0' }}>
+            BaggPlanning
+          </h1>
+          <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>
+            Connexion démo — Pharmacie Isabelle MAURER
+          </p>
+        </div>
+
+        {/* Sélection du rôle */}
+        <div style={{ marginBottom: '24px' }}>
+          <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', color: '#374151', marginBottom: '10px' }}>
+            Je suis...
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <button
+              onClick={() => { setRole('employe'); setSelectedEmployee('') }}
+              style={{
+                padding: '16px',
+                borderRadius: '12px',
+                border: role === 'employe' ? '2px solid #10b981' : '2px solid #e2e8f0',
+                backgroundColor: role === 'employe' ? '#ecfdf5' : 'white',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+            >
+              <div style={{ fontSize: '28px', marginBottom: '8px' }}>👤</div>
+              <div style={{ fontWeight: '600', color: role === 'employe' ? '#059669' : '#64748b', fontSize: '14px' }}>
+                Employé
+              </div>
+              <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>
+                Consulter mon planning
+              </div>
+            </button>
+            <button
+              onClick={() => { setRole('titulaire'); setSelectedEmployee('') }}
+              style={{
+                padding: '16px',
+                borderRadius: '12px',
+                border: role === 'titulaire' ? '2px solid #8b5cf6' : '2px solid #e2e8f0',
+                backgroundColor: role === 'titulaire' ? '#f5f3ff' : 'white',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+            >
+              <div style={{ fontSize: '28px', marginBottom: '8px' }}>👑</div>
+              <div style={{ fontWeight: '600', color: role === 'titulaire' ? '#7c3aed' : '#64748b', fontSize: '14px' }}>
+                Titulaire
+              </div>
+              <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>
+                Gérer les plannings
+              </div>
+            </button>
+          </div>
+        </div>
+
+        {/* Sélection de l'employé (si rôle employé) */}
+        {role === 'employe' && (
+          <div style={{ marginBottom: '24px' }}>
+            <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', color: '#374151', marginBottom: '10px' }}>
+              Choisir mon profil
+            </label>
+            <select
+              value={selectedEmployee}
+              onChange={(e) => setSelectedEmployee(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '14px 16px',
+                borderRadius: '10px',
+                border: '2px solid #e2e8f0',
+                fontSize: '14px',
+                backgroundColor: 'white',
+                cursor: 'pointer',
+                appearance: 'none',
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 12px center',
+                backgroundSize: '20px',
+              }}
+            >
+              <option value="">— Sélectionner —</option>
+              <optgroup label="💊 Pharmaciens">
+                {employees.filter(e => e.fonction === 'Pharmacien').map(e => (
+                  <option key={e.id} value={e.id}>{e.prenom} {e.nom}</option>
+                ))}
+              </optgroup>
+              <optgroup label="💉 Préparateurs">
+                {employees.filter(e => e.fonction === 'Preparateur').map(e => (
+                  <option key={e.id} value={e.id}>{e.prenom} {e.nom}</option>
+                ))}
+              </optgroup>
+              <optgroup label="🎓 Apprentis">
+                {employees.filter(e => e.fonction === 'Apprenti').map(e => (
+                  <option key={e.id} value={e.id}>{e.prenom} {e.nom}</option>
+                ))}
+              </optgroup>
+              <optgroup label="🎓 Étudiants">
+                {employees.filter(e => e.fonction === 'Etudiant').map(e => (
+                  <option key={e.id} value={e.id}>{e.prenom} {e.nom}</option>
+                ))}
+              </optgroup>
+              <optgroup label="📦 Conditionneurs">
+                {employees.filter(e => e.fonction === 'Conditionneur').map(e => (
+                  <option key={e.id} value={e.id}>{e.prenom} {e.nom}</option>
+                ))}
+              </optgroup>
+            </select>
           </div>
         )}
 
-        <div className="form-group">
-          <label className="form-label" htmlFor="email">Email</label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            className="form-input"
-            placeholder="votre@email.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoComplete="email"
-          />
-        </div>
+        {/* Info titulaire */}
+        {role === 'titulaire' && (
+          <div style={{
+            padding: '16px',
+            backgroundColor: '#f5f3ff',
+            borderRadius: '10px',
+            marginBottom: '24px',
+            border: '1px solid #e9d5ff',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{
+                width: '44px',
+                height: '44px',
+                borderRadius: '10px',
+                backgroundColor: '#8b5cf6',
+                color: 'white',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 'bold',
+                fontSize: '14px',
+              }}>
+                IM
+              </div>
+              <div>
+                <div style={{ fontWeight: '600', color: '#1e293b', fontSize: '14px' }}>Isabelle MAURER</div>
+                <div style={{ fontSize: '12px', color: '#64748b' }}>Pharmacien Titulaire</div>
+              </div>
+            </div>
+          </div>
+        )}
 
-        <div className="form-group">
-          <label className="form-label" htmlFor="password">Mot de passe</label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            className="form-input"
-            placeholder="••••••••"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            autoComplete="current-password"
-          />
-        </div>
-
-        <button type="submit" className="submit-btn" disabled={loading}>
-          {loading ? "⏳ Connexion en cours..." : "🔐 Se connecter"}
+        {/* Bouton connexion */}
+        <button
+          onClick={handleLogin}
+          disabled={loading || (role === 'employe' && !selectedEmployee)}
+          style={{
+            width: '100%',
+            padding: '16px',
+            borderRadius: '12px',
+            border: 'none',
+            backgroundColor: role === 'titulaire' ? '#8b5cf6' : '#10b981',
+            color: 'white',
+            fontSize: '16px',
+            fontWeight: '600',
+            cursor: loading || (role === 'employe' && !selectedEmployee) ? 'not-allowed' : 'pointer',
+            opacity: loading || (role === 'employe' && !selectedEmployee) ? 0.6 : 1,
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+          }}
+        >
+          {loading ? (
+            <>
+              <span style={{ animation: 'spin 1s linear infinite' }}>⏳</span>
+              Connexion...
+            </>
+          ) : (
+            <>
+              {role === 'titulaire' ? '👑' : '👤'} Se connecter
+            </>
+          )}
         </button>
-      </form>
 
-      <div className="divider">
-        <div className="divider-line" />
-        <span className="divider-text">COMPTES DÉMO</span>
-        <div className="divider-line" />
-      </div>
-
-      <div className="demo-accounts">
-        <div className="demo-title">Tester l'application</div>
-
-        <div className="demo-account">
-          <div>
-            <div className="demo-role">👩‍💼 Titulaire</div>
-            <div className="demo-email">titulaire@pharmacie.fr</div>
-          </div>
-          <button
-            className="demo-btn"
-            type="button"
-            onClick={() => fillDemo("titulaire@pharmacie.fr", "demo123")}
-          >
-            Utiliser
-          </button>
-        </div>
-
-        <div className="demo-account">
-          <div>
-            <div className="demo-role">🎓 Étudiant</div>
-            <div className="demo-email">anas@email.com</div>
-          </div>
-          <button
-            className="demo-btn"
-            type="button"
-            onClick={() => fillDemo("anas@email.com", "demo123")}
-          >
-            Utiliser
-          </button>
-        </div>
-      </div>
-
-      <div className="info-box">
-        💡 <strong>Astuce :</strong> Clique sur "Utiliser" puis "Se connecter".
+        {/* Footer */}
+        <p style={{
+          textAlign: 'center',
+          fontSize: '12px',
+          color: '#94a3b8',
+          marginTop: '24px',
+          marginBottom: 0,
+        }}>
+          🔒 Mode démo — Pas de mot de passe requis
+        </p>
       </div>
     </div>
-  );
-}
-
-// Loading fallback
-function LoginFormLoading() {
-  return (
-    <div className="login-card">
-      <div style={{ textAlign: 'center', padding: '40px' }}>
-        <div>⏳ Chargement...</div>
-      </div>
-    </div>
-  );
-}
-
-// Composant principal avec Suspense
-export default function LoginPage() {
-  const styles = `
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Inter', -apple-system, sans-serif; }
-    .login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #1e293b 0%, #0f172a 50%, #1e3a5f 100%); padding: 20px; }
-    .login-container { width: 100%; max-width: 420px; }
-    .login-header { text-align: center; margin-bottom: 32px; }
-    .logo { width: 72px; height: 72px; background: linear-gradient(135deg, #34d399, #059669); border-radius: 20px; display: flex; align-items: center; justify-content: center; font-size: 36px; margin: 0 auto 16px; box-shadow: 0 8px 32px rgba(16,185,129,0.4); }
-    .title { font-size: 28px; font-weight: 800; color: white; margin-bottom: 8px; }
-    .subtitle { color: #94a3b8; font-size: 14px; }
-    .login-card { background: white; border-radius: 24px; padding: 32px; box-shadow: 0 25px 50px rgba(0,0,0,0.25); }
-    .form-group { margin-bottom: 20px; }
-    .form-label { display: block; font-weight: 600; color: #334155; font-size: 14px; margin-bottom: 8px; }
-    .form-input { width: 100%; padding: 14px 16px; background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 15px; font-family: inherit; color: #1e293b; transition: all 0.2s; }
-    .form-input:focus { outline: none; border-color: #10b981; background: white; box-shadow: 0 0 0 3px rgba(16,185,129,0.1); }
-    .error-message { background: #fee2e2; color: #b91c1c; padding: 12px 16px; border-radius: 10px; font-size: 13px; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
-    .submit-btn { width: 100%; padding: 16px; background: linear-gradient(135deg, #10b981, #059669); border: none; border-radius: 12px; color: white; font-size: 16px; font-weight: 700; cursor: pointer; font-family: inherit; transition: all 0.2s; box-shadow: 0 4px 16px rgba(16,185,129,0.3); }
-    .submit-btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
-    .divider { display: flex; align-items: center; margin: 24px 0; gap: 16px; }
-    .divider-line { flex: 1; height: 1px; background: #e2e8f0; }
-    .divider-text { color: #94a3b8; font-size: 12px; }
-    .demo-accounts { background: #f8fafc; border-radius: 12px; padding: 16px; }
-    .demo-title { font-weight: 600; color: #64748b; font-size: 12px; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .demo-account { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #e2e8f0; }
-    .demo-account:last-child { border-bottom: none; }
-    .demo-role { font-weight: 600; color: #334155; font-size: 14px; }
-    .demo-email { color: #64748b; font-size: 12px; }
-    .demo-btn { padding: 8px 16px; background: #10b981; border: none; border-radius: 8px; color: white; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.2s; }
-    .info-box { background: #eff6ff; border-radius: 10px; padding: 12px 16px; margin-top: 16px; font-size: 12px; color: #1e40af; }
-  `;
-
-  return (
-    <div>
-      <style dangerouslySetInnerHTML={{ __html: styles }} />
-      <div className="login-page">
-        <div className="login-container">
-          <div className="login-header">
-            <div className="logo">📅</div>
-            <h1 className="title">BaggPlanning</h1>
-            <p className="subtitle">Gestion des plannings de la pharmacie</p>
-          </div>
-
-          <Suspense fallback={<LoginFormLoading />}>
-            <LoginForm />
-          </Suspense>
-        </div>
-      </div>
-    </div>
-  );
+  )
 }
