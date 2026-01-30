@@ -1,219 +1,204 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { MOCK_EMPLOYEES, MOCK_DISPONIBILITES, SEMAINE_REFERENCE, JOURS_SEMAINE } from '@/lib/mock-data'
+import { useEffect, useState } from 'react'
 
-interface Session {
-  role: string
-  employeeId: string
-  employeeName: string
-}
+export default function EmployeDisponibilitesPage() {
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' }>({
+    visible: false,
+    message: '',
+    type: 'success',
+  })
 
-const DAYS_SHORT = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam']
+  const jours = [
+    { id: 'lundi', nom: 'Lundi', date: '20 janvier', shortDate: '20' },
+    { id: 'mardi', nom: 'Mardi', date: '21 janvier', shortDate: '21' },
+    { id: 'mercredi', nom: 'Mercredi', date: '22 janvier', shortDate: '22' },
+    { id: 'jeudi', nom: 'Jeudi', date: '23 janvier', shortDate: '23' },
+    { id: 'vendredi', nom: 'Vendredi', date: '24 janvier', shortDate: '24' },
+    { id: 'samedi', nom: 'Samedi', date: '25 janvier', shortDate: '25' },
+  ]
 
-export default function EmployeDisponibilites() {
-  const [session, setSession] = useState<Session | null>(null)
-  const [disponibilites, setDisponibilites] = useState<Record<string, string | null>>({})
-  const [saved, setSaved] = useState(false)
+  const heuresDebut = ['08:30', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00']
+  const heuresFin = ['12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '19:30', '20:30']
 
-  useEffect(() => {
-    const stored = localStorage.getItem('baggplanning_session')
-    if (stored) {
-      const parsed = JSON.parse(stored)
-      setSession(parsed)
-      
-      // Charger les dispos existantes
-      const dispo = MOCK_DISPONIBILITES.find(d => d.employee_id === parsed.employeeId)
-      if (dispo) {
-        const initial: Record<string, string | null> = {}
-        JOURS_SEMAINE.forEach(j => {
-          initial[j] = dispo[j as keyof typeof dispo] as string | null
-        })
-        setDisponibilites(initial)
+  const [disponibilites, setDisponibilites] = useState<Record<string, { disponible: boolean; debut: string; fin: string }>>(() => {
+    const init: Record<string, { disponible: boolean; debut: string; fin: string }> = {}
+    jours.forEach((j) => {
+      init[j.id] = { disponible: false, debut: '17:00', fin: '20:30' }
+    })
+    return init
+  })
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ visible: true, message, type })
+    window.setTimeout(() => setToast({ visible: false, message: '', type: 'success' }), 3500)
+  }
+
+  const formatHeure = (h: string) => h.replace(':', 'h')
+
+  const calculerHeures = () => {
+    let total = 0
+    Object.values(disponibilites).forEach((d) => {
+      if (d.disponible) {
+        const [hD, mD] = d.debut.split(':').map(Number)
+        const [hF, mF] = d.fin.split(':').map(Number)
+        total += hF + mF / 60 - (hD + mD / 60)
       }
+    })
+    return total.toFixed(1)
+  }
+
+  const toggleDispo = (jourId: string, value: boolean) => {
+    setDisponibilites((prev) => ({
+      ...prev,
+      [jourId]: { ...prev[jourId], disponible: value },
+    }))
+  }
+
+  const updateHeure = (jourId: string, type: 'debut' | 'fin', value: string) => {
+    setDisponibilites((prev) => ({
+      ...prev,
+      [jourId]: { ...prev[jourId], [type]: value },
+    }))
+  }
+
+  const quickSelect = (jourId: string, slot: string) => {
+    const slots: Record<string, { debut: string; fin: string }> = {
+      matin: { debut: '08:30', fin: '14:00' },
+      aprem: { debut: '14:00', fin: '20:30' },
+      soir: { debut: '17:00', fin: '20:30' },
+      journee: { debut: '08:30', fin: '20:30' },
     }
-  }, [])
-
-  if (!session) return null
-
-  const employee = MOCK_EMPLOYEES.find(e => e.id === session.employeeId)
-  const isVariable = employee?.typeEDT === 'variable'
-
-  const updateDispo = (jour: string, value: string | null) => {
-    setDisponibilites(prev => ({ ...prev, [jour]: value }))
-    setSaved(false)
+    if (slots[slot]) {
+      setDisponibilites((prev) => ({
+        ...prev,
+        [jourId]: { disponible: true, ...slots[slot] },
+      }))
+    }
   }
 
-  const handleSave = () => {
-    // Simuler la sauvegarde
-    setSaved(true)
-    setTimeout(() => setSaved(false), 3000)
+  const setAllAvailable = (value: boolean) => {
+    setDisponibilites((prev) => {
+      const newState = { ...prev }
+      Object.keys(newState).forEach((key) => {
+        newState[key] = { ...newState[key], disponible: value }
+      })
+      return newState
+    })
   }
 
-  if (!isVariable) {
-    return (
-      <div style={{ padding: '24px', maxWidth: '800px', margin: '0 auto' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#1e293b', margin: '0 0 8px 0' }}>📋 Mes Disponibilités</h1>
-        <p style={{ color: '#64748b', margin: '0 0 24px 0' }}>{SEMAINE_REFERENCE.jours[0]} - {SEMAINE_REFERENCE.jours[5]} {SEMAINE_REFERENCE.mois}</p>
-        
-        <div style={{
-          padding: '40px',
-          backgroundColor: '#f8fafc',
-          borderRadius: '12px',
-          border: '1px solid #e2e8f0',
-          textAlign: 'center',
-        }}>
-          <span style={{ fontSize: '48px' }}>📌</span>
-          <h2 style={{ fontSize: '18px', fontWeight: '600', color: '#1e293b', margin: '16px 0 8px 0' }}>Planning fixe</h2>
-          <p style={{ color: '#64748b', margin: 0 }}>
-            Vous avez un planning fixe. Vos horaires sont définis par le titulaire.<br/>
-            Consultez "Mon Planning" pour voir vos horaires.
-          </p>
-        </div>
-      </div>
-    )
+  const saveDisponibilites = () => {
+    showToast('Disponibilités enregistrées avec succès !')
   }
 
   return (
-    <div style={{ padding: '24px', maxWidth: '800px', margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
-        <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#1e293b', margin: '0 0 8px 0' }}>📋 Mes Disponibilités</h1>
-          <p style={{ color: '#64748b', margin: 0 }}>{SEMAINE_REFERENCE.jours[0]} - {SEMAINE_REFERENCE.jours[5]} {SEMAINE_REFERENCE.mois}</p>
+    <>
+      <div className="week-header">
+        <div className="week-header-top">
+          <div>
+            <p className="week-label">Semaine</p>
+            <p className="week-dates">20 - 25 Janvier 2025</p>
+          </div>
+          <div>
+            <p className="week-hours-label">Total prévu</p>
+            <p className="week-hours">{calculerHeures()}h</p>
+          </div>
         </div>
-        <button
-          onClick={handleSave}
-          style={{
-            padding: '12px 24px',
-            backgroundColor: saved ? '#10b981' : '#3b82f6',
-            color: 'white',
-            border: 'none',
-            borderRadius: '10px',
-            fontWeight: '600',
-            cursor: 'pointer',
-            fontSize: '14px',
-          }}
-        >
-          {saved ? '✓ Enregistré !' : '💾 Enregistrer'}
+        <div className="deadline-badge">
+          ⏰ Date limite : <strong>Dimanche 19 janvier à 20h</strong>
+        </div>
+      </div>
+
+      <div className="quick-actions">
+        <button className="quick-action-btn primary" onClick={() => setAllAvailable(true)}>
+          ✓ Tout disponible
+        </button>
+        <button className="quick-action-btn secondary" onClick={() => setAllAvailable(false)}>
+          ✗ Tout effacer
         </button>
       </div>
 
-      <div style={{
-        padding: '16px',
-        backgroundColor: '#eff6ff',
-        borderRadius: '10px',
-        border: '1px solid #bfdbfe',
-        marginBottom: '24px',
-        display: 'flex',
-        gap: '12px',
-      }}>
-        <span style={{ fontSize: '24px' }}>💡</span>
-        <div>
-          <p style={{ fontWeight: '600', color: '#1e40af', margin: '0 0 4px 0', fontSize: '14px' }}>Comment ça marche ?</p>
-          <p style={{ color: '#3b82f6', margin: 0, fontSize: '13px' }}>
-            Indiquez vos disponibilités pour chaque jour. Le titulaire utilisera ces informations pour créer votre planning.
-          </p>
-        </div>
-      </div>
-
-      <div style={{ backgroundColor: 'white', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-        {JOURS_SEMAINE.map((jour, i) => {
-          const dispo = disponibilites[jour]
-          const isAvailable = dispo !== null && dispo !== undefined
-
-          return (
-            <div key={jour} style={{
-              padding: '20px',
-              borderBottom: i < 5 ? '1px solid #e2e8f0' : 'none',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '20px',
-            }}>
-              <div style={{ width: '140px' }}>
-                <p style={{ fontWeight: '600', color: '#1e293b', margin: '0 0 4px 0' }}>{SEMAINE_REFERENCE.jours[i]}</p>
-                <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>{DAYS_SHORT[i]}</p>
+      {jours.map((jour) => {
+        const dispo = disponibilites[jour.id]
+        return (
+          <div key={jour.id} className={`day-card ${dispo.disponible ? 'available' : ''}`}>
+            <div className="day-header">
+              <div className="day-header-left">
+                <div className="day-number">{jour.shortDate}</div>
+                <div>
+                  <div className="day-name">{jour.nom}</div>
+                  <div className="day-date">{jour.date}</div>
+                </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button
-                  onClick={() => updateDispo(jour, dispo || '08:00-18:00')}
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: isAvailable ? '#dcfce7' : 'white',
-                    border: isAvailable ? '2px solid #10b981' : '2px solid #e2e8f0',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontWeight: '500',
-                    color: isAvailable ? '#16a34a' : '#64748b',
-                    fontSize: '13px',
-                  }}
-                >
-                  ✓ Disponible
-                </button>
-                <button
-                  onClick={() => updateDispo(jour, null)}
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: !isAvailable ? '#fee2e2' : 'white',
-                    border: !isAvailable ? '2px solid #ef4444' : '2px solid #e2e8f0',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontWeight: '500',
-                    color: !isAvailable ? '#dc2626' : '#64748b',
-                    fontSize: '13px',
-                  }}
-                >
-                  ✕ Indisponible
-                </button>
-              </div>
-
-              {isAvailable && (
-                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontSize: '13px', color: '#64748b' }}>Horaires :</span>
-                  <input
-                    type="text"
-                    value={dispo || ''}
-                    onChange={(e) => updateDispo(jour, e.target.value)}
-                    placeholder="ex: 8h-14h ou 14h-20h"
-                    style={{
-                      padding: '8px 12px',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: '6px',
-                      fontSize: '13px',
-                      width: '150px',
-                    }}
-                  />
+              {dispo.disponible && (
+                <div className="day-hours">
+                  {formatHeure(dispo.debut)} - {formatHeure(dispo.fin)}
                 </div>
               )}
             </div>
-          )
-        })}
-      </div>
 
-      {/* Résumé */}
-      <div style={{
-        marginTop: '24px',
-        padding: '20px',
-        backgroundColor: '#f8fafc',
-        borderRadius: '12px',
-        border: '1px solid #e2e8f0',
-      }}>
-        <h3 style={{ fontSize: '14px', fontWeight: '600', color: '#64748b', margin: '0 0 12px 0' }}>📊 Résumé</h3>
-        <div style={{ display: 'flex', gap: '24px' }}>
-          <div>
-            <span style={{ fontSize: '24px', fontWeight: 'bold', color: '#10b981' }}>
-              {JOURS_SEMAINE.filter(j => disponibilites[j]).length}
-            </span>
-            <span style={{ fontSize: '14px', color: '#64748b', marginLeft: '8px' }}>jours disponibles</span>
+            <div className="day-content">
+              <div className="toggle-btns">
+                <button className={`toggle-btn ${dispo.disponible ? 'available' : ''}`} onClick={() => toggleDispo(jour.id, true)}>
+                  ✓ Disponible
+                </button>
+                <button className={`toggle-btn ${!dispo.disponible ? 'unavailable' : ''}`} onClick={() => toggleDispo(jour.id, false)}>
+                  ✗ Indisponible
+                </button>
+              </div>
+
+              <div className={`time-selector ${dispo.disponible ? 'visible' : ''}`}>
+                <div className="time-input">
+                  <label>Début</label>
+                  <select value={dispo.debut} onChange={(e) => updateHeure(jour.id, 'debut', e.target.value)}>
+                    {heuresDebut.map((h) => (
+                      <option key={h} value={h}>
+                        {formatHeure(h)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <span className="time-arrow">→</span>
+                <div className="time-input">
+                  <label>Fin</label>
+                  <select value={dispo.fin} onChange={(e) => updateHeure(jour.id, 'fin', e.target.value)}>
+                    {heuresFin.map((h) => (
+                      <option key={h} value={h}>
+                        {formatHeure(h)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className={`quick-select ${dispo.disponible ? 'visible' : ''}`}>
+                <button className="quick-btn" onClick={() => quickSelect(jour.id, 'matin')}>
+                  🌅 Matin
+                </button>
+                <button className="quick-btn" onClick={() => quickSelect(jour.id, 'aprem')}>
+                  🌆 Après-midi
+                </button>
+                <button className="quick-btn" onClick={() => quickSelect(jour.id, 'soir')}>
+                  🌙 Soir
+                </button>
+                <button className="quick-btn" onClick={() => quickSelect(jour.id, 'journee')}>
+                  ☀️ Journée
+                </button>
+              </div>
+            </div>
           </div>
-          <div>
-            <span style={{ fontSize: '24px', fontWeight: 'bold', color: '#ef4444' }}>
-              {JOURS_SEMAINE.filter(j => !disponibilites[j]).length}
-            </span>
-            <span style={{ fontSize: '14px', color: '#64748b', marginLeft: '8px' }}>jours indisponibles</span>
-          </div>
-        </div>
+        )
+      })}
+
+      <button className="submit-btn" onClick={saveDisponibilites}>
+        ✓ Enregistrer mes disponibilités
+      </button>
+
+      <div className={`toast ${toast.type} ${toast.visible ? 'active' : ''}`}>
+        <span>{toast.type === 'success' ? '✓' : '✗'}</span>
+        <span>{toast.message}</span>
       </div>
-    </div>
+    </>
   )
 }

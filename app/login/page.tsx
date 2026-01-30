@@ -139,6 +139,7 @@ export default function LoginPage() {
               Choisir mon profil
             </label>
             <select
+              required
               value={selectedEmployee}
               onChange={(e) => setSelectedEmployee(e.target.value)}
               style={{
@@ -147,6 +148,9 @@ export default function LoginPage() {
                 borderRadius: '10px',
                 border: '2px solid #e2e8f0',
                 fontSize: '14px',
+                // Color and fontWeight depend on selectedEmployee
+                color: selectedEmployee ? '#0f172a' : '#94a3b8',
+                fontWeight: selectedEmployee ? 600 : 500,
                 backgroundColor: 'white',
                 cursor: 'pointer',
                 appearance: 'none',
@@ -156,7 +160,9 @@ export default function LoginPage() {
                 backgroundSize: '20px',
               }}
             >
-              <option value="">— Sélectionner —</option>
+              <option value="" disabled>
+                — Sélectionner —
+              </option>
               <optgroup label="💊 Pharmaciens">
                 {employees.filter(e => e.fonction === 'Pharmacien').map(e => (
                   <option key={e.id} value={e.id}>{e.prenom} {e.nom}</option>

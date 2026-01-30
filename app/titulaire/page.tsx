@@ -239,7 +239,7 @@ export default function TitulaireDashboardPage() {
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(5, 1fr)',
-            gap: '16px',
+            gap: '12px',
           }}>
             <EquipeStatCard
               icon={getRoleIcon('Pharmacien')}
@@ -298,29 +298,56 @@ function KPICard({
   alert?: boolean
 }) {
   return (
-    <div style={{
-      backgroundColor: 'white',
-      borderRadius: '12px',
-      padding: '20px',
-      border: alert ? `2px solid ${color}` : '1px solid #e2e8f0',
-      cursor: 'pointer',
-      transition: 'all 0.2s',
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <span style={{ fontSize: '24px' }}>{icon}</span>
+    <div
+      style={{
+        backgroundColor: 'white',
+        borderRadius: '12px',
+        padding: '16px',
+        border: alert ? `2px solid ${color}` : '1px solid #e2e8f0',
+        cursor: 'pointer',
+        transition: 'all 0.2s',
+        position: 'relative',
+      }}
+    >
+      {/* Icon badge (top-right) */}
+      <div
+        style={{
+          position: 'absolute',
+          top: '12px',
+          right: '12px',
+          width: '60px',
+          height: '60px',
+          borderRadius: '10px',
+          backgroundColor: color + '18',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+        aria-hidden
+      >
+        <span style={{ fontSize: '40px', fontWeight: '600', lineHeight: 1 }}>{icon}</span>
+
         {alert && (
-          <span style={{
-            width: '10px',
-            height: '10px',
-            borderRadius: '50%',
-            backgroundColor: color,
-            animation: 'pulse 2s infinite',
-          }} />
+          <span
+            style={{
+              position: 'absolute',
+              top: '-3px',
+              right: '-3px',
+              width: '10px',
+              height: '10px',
+              borderRadius: '50%',
+              backgroundColor: color,
+              border: '2px solid white',
+              animation: 'pulse 2s infinite',
+            }}
+          />
         )}
       </div>
-      <p style={{ fontSize: '13px', color: '#64748b', margin: '12px 0 4px 0' }}>{title}</p>
-      <p style={{ fontSize: '28px', fontWeight: 'bold', color: color, margin: 0 }}>{value}</p>
-      <p style={{ fontSize: '12px', color: '#94a3b8', margin: '4px 0 0 0' }}>{subtitle}</p>
+
+      {/* Content (denser, moved up) */}
+      <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 6px 0' }}>{title}</p>
+      <p style={{ fontSize: '28px', fontWeight: 'bold', color: color, margin: '0 0 6px 0' }}>{value}</p>
+      <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>{subtitle}</p>
     </div>
   )
 }
@@ -413,34 +440,59 @@ function DemandeItem({ demande }: { demande: typeof MOCK_DEMANDES[0] }) {
   )
 }
 
-function EquipeStatCard({ 
-  icon, 
-  label, 
-  count, 
-  color 
-}: { 
+function EquipeStatCard({
+  icon,
+  label,
+  count,
+  color,
+}: {
   icon: string
   label: string
   count: number
   color: string
 }) {
   return (
-    <div style={{
-      padding: '16px',
-      backgroundColor: color + '10',
-      borderRadius: '10px',
-      textAlign: 'center',
-    }}>
-      <span style={{ fontSize: '24px' }}>{icon}</span>
-      <p style={{ 
-        fontSize: '24px', 
-        fontWeight: 'bold', 
-        color: color, 
-        margin: '8px 0 4px 0' 
-      }}>
+    <div
+      style={{
+        padding: '10px 12px',
+        backgroundColor: color + '10',
+        borderRadius: '10px',
+        border: `1px solid ${color + '25'}`,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+      }}
+    >
+      <span style={{ fontSize: '20px', lineHeight: 1 }}>{icon}</span>
+
+      <span
+        style={{
+          fontSize: '18px',
+          fontWeight: 800,
+          color: color,
+          lineHeight: 1,
+          minWidth: '28px',
+          textAlign: 'right',
+          flexShrink: 0,
+        }}
+      >
         {count}
-      </p>
-      <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>{label}</p>
+      </span>
+
+      <span
+        style={{
+          fontSize: '12px',
+          fontWeight: 600,
+          color: '#111827',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+        title={label}
+      >
+        {label}
+      </span>
     </div>
   )
 }

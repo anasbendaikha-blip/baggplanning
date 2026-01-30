@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: '/titulaire/disponibilites', label: 'Disponibilités', icon: '📅' },
   { href: '/titulaire/demandes', label: 'Demandes', icon: '📋' },
   { href: '/titulaire/planning', label: 'Planning', icon: '📆' },
+
 ]
 
 export default function TitulaireLayout({ children }: { children: ReactNode }) {
