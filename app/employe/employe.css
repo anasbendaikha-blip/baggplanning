@@ -8,7 +8,7 @@ body {
 .header {
   position: sticky;
   top: 0;
-  z-index: 100;
+  z-index: 300;
   background: rgba(255,255,255,0.85);
   backdrop-filter: blur(20px);
   border-bottom: 1px solid rgba(226,232,240,0.5);
@@ -74,7 +74,7 @@ body {
   border-radius: 12px;
   box-shadow: 0 10px 40px rgba(0,0,0,0.15);
   overflow: hidden;
-  z-index: 200;
+  z-index: 400;
 }
 .user-dropdown.active { display: block; }
 .user-option {
@@ -113,7 +113,7 @@ body {
 .nav {
   position: sticky;
   top: 64px;
-  z-index: 90;
+  z-index: 290;
   background: rgba(255,255,255,0.85);
   backdrop-filter: blur(20px);
   border-bottom: 1px solid rgba(226,232,240,0.5);
@@ -414,7 +414,12 @@ body {
 .toast.error { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
 .toast.active { transform: translateX(-50%) translateY(0); opacity: 1; }
 
-.overlay { position: fixed; inset: 0; z-index: 150; }
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 350;
+  background: rgba(0,0,0,0);
+}
 
 @media (max-width: 480px) {
   .user-info { display: none; }
