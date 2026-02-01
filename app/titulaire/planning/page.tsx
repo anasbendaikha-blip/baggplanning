@@ -75,7 +75,7 @@ export default function PlanningPage() {
   const goToPrevWeek = () => setWeekStart(prev => addWeeks(prev, -1))
   const goToNextWeek = () => setWeekStart(prev => addWeeks(prev, 1))
   const goToToday = () => { setWeekStart(getWeekStart(new Date())); setSelectedDay(0) }
-  const [activeView, setActiveView] = useState<'day' | 'recap' | 'guards'>('day')
+  const [activeView, setActiveView] = useState<'day'>('day')
   const [slots, setSlots] = useState<Record<string, PlanningSlot[]>>(() => initPlanning())
   const [studentStates, setStudentStates] = useState<Record<string, StudentCardState>>({})
   const [toast, setToast] = useState<string | null>(null)
@@ -275,304 +275,335 @@ export default function PlanningPage() {
           {currentWeekDayNames.map((dayName, i) => {
             const active = activeView === 'day' && selectedDay === i
             const [name, num] = dayName.split(' ')
-            return <button key={i} onClick={() => { setSelectedDay(i); setActiveView('day') }} style={{ padding: '6px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', background: active ? '#eff6ff' : 'transparent', borderBottom: active ? '2px solid #3b82f6' : '2px solid transparent', border: 'none', cursor: 'pointer' }}>
+            return <button key={i} onClick={() => { setSelectedDay(i) }} style={{ padding: '6px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', background: active ? '#eff6ff' : 'transparent', borderBottom: active ? '2px solid #3b82f6' : '2px solid transparent', border: 'none', cursor: 'pointer' }}>
               <span style={{ fontWeight: '600', color: active ? '#2563eb' : TXT.primary, fontSize: '12px' }}>{name}</span>
               <span style={{ fontSize: '10px', color: active ? '#3b82f6' : TXT.secondary }}>{num}</span>
             </button>
           })}
         </div>
         <div style={{ display: 'flex', gap: '4px', alignSelf: 'center' }}>
-          <button onClick={() => setActiveView('recap')} style={{ padding: '4px 10px', background: activeView === 'recap' ? '#3b82f6' : 'transparent', color: activeView === 'recap' ? 'white' : TXT.primary, border: 'none', borderRadius: '4px', fontWeight: '500', cursor: 'pointer', fontSize: '11px' }}>📊 Récap</button>
-          <button onClick={() => setActiveView('guards')} style={{ padding: '4px 10px', background: activeView === 'guards' ? '#8b5cf6' : 'transparent', color: activeView === 'guards' ? 'white' : TXT.primary, border: 'none', borderRadius: '4px', fontWeight: '500', cursor: 'pointer', fontSize: '11px' }}>🌙 Gardes</button>
+          <Link
+            href="/titulaire/planning/recap"
+            style={{
+              padding: '4px 10px',
+              background: 'transparent',
+              color: TXT.primary,
+              border: 'none',
+              borderRadius: '4px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              fontSize: '11px',
+              textDecoration: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            📊 Récap
+          </Link>
+          <Link
+            href="/titulaire/gardes"
+            style={{
+              padding: '4px 10px',
+              background: 'transparent',
+              color: TXT.primary,
+              border: 'none',
+              borderRadius: '4px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              fontSize: '11px',
+              textDecoration: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            🌙 Gardes
+          </Link>
         </div>
       </nav>
 
-      {activeView === 'day' && (
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          {/* Sidebar */}
-          {showSidebar && (
-            <StudentSidebar
-              selectedDay={selectedDay}
-              weekDayNames={currentWeekDayNames}
-              onAssign={handleSidebarAssign}
-              onClose={() => setShowSidebar(false)}
-            />
-          )}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        {/* Sidebar */}
+        {showSidebar && (
+          <StudentSidebar
+            selectedDay={selectedDay}
+            weekDayNames={currentWeekDayNames}
+            onAssign={handleSidebarAssign}
+            onClose={() => setShowSidebar(false)}
+          />
+        )}
 
-          {/* Gantt */}
-          <main style={{ flex: 1, overflow: 'auto', background: 'white' }}>
-            <div style={{ padding: '8px 10px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                <h2 style={{ fontSize: '13px', fontWeight: '600', margin: 0, color: TXT.primary }}>📅 {currentWeekDayNames[selectedDay]} {weekStart.getFullYear()}</h2>
-                <div style={{ display: 'flex', gap: '4px' }}>
-                  <Link
-                    href={`/titulaire/planning/print?weekStart=${encodeURIComponent(currentWeekDates[0] || '')}`}
-                    onClick={(e) => e.stopPropagation()}
-                    style={{
-                      padding: '4px 8px',
-                      background: 'white',
-                      border: '1px solid #d1d5db',
-                      borderRadius: '3px',
-                      cursor: 'pointer',
-                      fontSize: '10px',
-                      color: TXT.primary,
-                      textDecoration: 'none',
-                      display: 'inline-block'
-                    }}
-                  >
-                    🖨️ PDF
-                  </Link>
-                  <button onClick={() => showToast('✓ Enregistré')} style={{ padding: '4px 8px', background: '#10b981', color: 'white', border: 'none', borderRadius: '3px', fontWeight: '600', cursor: 'pointer', fontSize: '10px' }}>💾 Sauver</button>
-                </div>
+        {/* Gantt */}
+        <main style={{ flex: 1, overflow: 'auto', background: 'white' }}>
+          <div style={{ padding: '8px 10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <h2 style={{ fontSize: '13px', fontWeight: '600', margin: 0, color: TXT.primary }}>📅 {currentWeekDayNames[selectedDay]} {weekStart.getFullYear()}</h2>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <Link
+                  href={`/titulaire/planning/print?weekStart=${encodeURIComponent(currentWeekDates[0] || '')}`}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    padding: '4px 8px',
+                    background: 'white',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '3px',
+                    cursor: 'pointer',
+                    fontSize: '10px',
+                    color: TXT.primary,
+                    textDecoration: 'none',
+                    display: 'inline-block'
+                  }}
+                >
+                  🖨️ PDF
+                </Link>
+                <button onClick={() => showToast('✓ Enregistré')} style={{ padding: '4px 8px', background: '#10b981', color: 'white', border: 'none', borderRadius: '3px', fontWeight: '600', cursor: 'pointer', fontSize: '10px' }}>💾 Sauver</button>
               </div>
+            </div>
 
-              <div style={{ border: '1px solid #e2e8f0', borderRadius: '6px', overflow: 'hidden' }}>
-                {/* Header heures */}
-                <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0', background: '#f9fafb', position: 'sticky', top: 0, zIndex: 10 }}>
-                  <div style={{ width: `${EMP_COL_W}px`, padding: '4px 6px', fontWeight: '600', color: TXT.secondary, fontSize: '9px', borderRight: '1px solid #e2e8f0', textTransform: 'uppercase' }}>Employé</div>
-                  <div style={{ flex: 1, display: 'flex' }}>
-                    {HOURS.slice(0, -1).map(h => (
-                      <div
-                        key={h}
-                        style={{
-                          flex: 1,
-                          padding: '4px 0',
-                          textAlign: 'left',
-                          paddingLeft: '4px',
-                          fontSize: '9px',
-                          color: TXT.secondary,
-                          fontWeight: isKeyTime(h) ? '800' : '500',
-                          borderRight: '1px solid #f1f5f9',
-                          background: isLunchCol(h) ? '#fef9c3' : 'transparent',
-                          lineHeight: '1',
-                        }}
-                      >
-                        {(isKeyTime(h) || Math.round((h % 1) * 60) === 0)
-                          ? (h === REAL_START ? '8h30' : h === REAL_END ? '20h30' : formatHourLabel(h))
-                          : ''}
-                      </div>
-                    ))}
+            <div style={{ border: '1px solid #e2e8f0', borderRadius: '6px', overflow: 'hidden' }}>
+              {/* Header heures */}
+              <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0', background: '#f9fafb', position: 'sticky', top: 0, zIndex: 10 }}>
+                <div style={{ width: `${EMP_COL_W}px`, padding: '4px 6px', fontWeight: '600', color: TXT.secondary, fontSize: '9px', borderRight: '1px solid #e2e8f0', textTransform: 'uppercase' }}>Employé</div>
+                <div style={{ flex: 1, display: 'flex' }}>
+                  {HOURS.slice(0, -1).map(h => (
                     <div
+                      key={h}
                       style={{
-                        width: 0,
-                        position: 'relative',
+                        flex: 1,
+                        padding: '4px 0',
+                        textAlign: 'left',
+                        paddingLeft: '4px',
+                        fontSize: '9px',
+                        color: TXT.secondary,
+                        fontWeight: isKeyTime(h) ? '800' : '500',
+                        borderRight: '1px solid #f1f5f9',
+                        background: isLunchCol(h) ? '#fef9c3' : 'transparent',
+                        lineHeight: '1',
                       }}
                     >
-                      <span
-                        style={{
-                          position: 'absolute',
-                          left: '100%',
-                          top: 0,
-                          transform: 'translateX(-50%)',
-                          fontSize: '9px',
-                          color: TXT.secondary,
-                          fontWeight: '800',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {formatHourLabel(END_HOUR)}
-                      </span>
+                      {(isKeyTime(h) || Math.round((h % 1) * 60) === 0)
+                        ? (h === REAL_START ? '8h30' : h === REAL_END ? '20h30' : formatHourLabel(h))
+                        : ''}
                     </div>
-                  </div>
-                </div>
-
-                {/* Rows */}
-                {filteredRoles.map(role => {
-                  const emps = empByRole[role]
-                  if (emps.length === 0 && role !== 'Etudiant') return null
-                  const isCollapsed = collapsedRoles.has(role)
-                  return (
-                    <div key={role}>
-                      <div onClick={() => toggleRole(role)} style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 6px', background: '#f3f4f6', borderBottom: '1px solid #e2e8f0', cursor: 'pointer', userSelect: 'none' }}>
-                        <span style={{ fontSize: '9px', color: TXT.muted }}>{isCollapsed ? '▶' : '▼'}</span>
-                        <span style={{ fontSize: '12px' }}>{getRoleIcon(role)}</span>
-                        <span style={{ fontWeight: '600', color: TXT.primary, fontSize: '11px' }}>{getRoleLabel(role)}s</span>
-                        <span style={{ padding: '1px 5px', background: 'white', borderRadius: '8px', fontSize: '9px', color: TXT.secondary, border: '1px solid #e2e8f0' }}>{emps.length}</span>
-                      </div>
-                      {!isCollapsed && emps.map(emp => {
-                        const empSlots = getEmpSlots(emp.id), workSlots = empSlots.filter(s => s.type === 'work'), pauseSlots = empSlots.filter(s => s.type === 'pause'), isWorking = workSlots.length > 0, color = (emp.fonction === 'Etudiant' ? '#122041ff' : ROLE_COLORS[emp.fonction])
-                        return (
-                          <div key={emp.id} onClick={() => openEdit(emp)} style={{ display: 'flex', borderBottom: '1px solid #f3f4f6', cursor: 'pointer' }} onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'} onMouseLeave={e => e.currentTarget.style.background = 'white'}>
-                            <div style={{ width: `${EMP_COL_W}px`, padding: '4px', display: 'flex', alignItems: 'center', gap: '4px', borderRight: '1px solid #f1f5f9' }}>
-                              <div style={{ width: '22px', height: '22px', borderRadius: '4px', background: isWorking ? color : '#e5e7eb', color: isWorking ? 'white' : TXT.muted, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '9px', flexShrink: 0 }}>{emp.initiales}</div>
-                              <div style={{ minWidth: 0, flex: 1 }}>
-                                <div style={{ fontWeight: '700', color: TXT.primary, fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{emp.prenom}</div>
-                                <div style={{ fontSize: '9px', color: isWorking ? TXT.secondary : TXT.link, fontWeight: isWorking ? '600' : '700' }}>{isWorking ? `${workSlots[0].start_time}→${workSlots[0].end_time}` : 'Éditer'}</div>
-                              </div>
-                            </div>
-                            <div style={{ flex: 1, position: 'relative', height: '36px' }}>
-                              <div style={{ position: 'absolute', inset: 0, display: 'flex' }}>
-                                {HOURS.slice(0, -1).map(h => (
-                                  <div
-                                    key={h}
-                                    style={{
-                                      flex: 1,
-                                      borderRight: '1px solid #f5f5f5',
-                                      background: isLunchCol(h) ? 'rgba(254,249,195,0.3)' : 'transparent',
-                                    }}
-                                  />
-                                ))}
-                              </div>
-                              {workSlots.map(s => <div key={s.id} style={{ position: 'absolute', top: '3px', bottom: '3px', left: `${toPct(s.start_time)}%`, width: `${Math.max(toPct(s.end_time) - toPct(s.start_time), 4)}%`, background: color, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '10px', fontWeight: '600', boxShadow: '0 1px 2px rgba(0,0,0,0.15)', border: '1px solid rgba(255,255,255,0.2)' }}>{toPct(s.end_time) - toPct(s.start_time) > 10 && `${s.start_time}-${s.end_time}`}</div>)}
-                              {pauseSlots.map(s => <div key={s.id} style={{ position: 'absolute', top: '3px', bottom: '3px', left: `${toPct(s.start_time)}%`, width: `${Math.max(toPct(s.end_time) - toPct(s.start_time), 3)}%`, background: '#f59e0b', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '10px', fontWeight: '600', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>☕</div>)}
-                            {isEmployeeOnConge(emp.id, currentWeekDates[selectedDay]) && <div style={{ position: 'absolute', top: '3px', bottom: '3px', left: '0%', width: '100%', background: 'repeating-linear-gradient(45deg, #fecaca, #fecaca 5px, #fca5a5 5px, #fca5a5 10px)', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#991b1b', fontSize: '11px', fontWeight: '700', border: '1px solid #f87171', zIndex: 5 }}>🏖️ Congé</div>}
-                            </div>
-                          </div>
-                        )
-                      })}
-                      {!isCollapsed && emps.length === 0 && role === 'Etudiant' && <div style={{ padding: '10px', textAlign: 'center', color: TXT.muted, fontSize: '10px' }}>👈 Assignez depuis la sidebar</div>}
-                    </div>
-                  )
-                })}
-              </div>
-
-              {/* Légende */}
-              <div style={{ marginTop: '6px', padding: '4px 8px', background: '#f9fafb', borderRadius: '4px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-                {ROLE_ORDER.map(r => <div key={r} style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><div style={{ width: '10px', height: '5px', background: ROLE_COLORS[r], borderRadius: '1px' }} /><span style={{ fontSize: '9px', color: TXT.secondary }}>{getRoleLabel(r)}</span></div>)}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><div style={{ width: '10px', height: '5px', background: '#f59e0b', borderRadius: '1px' }} /><span style={{ fontSize: '9px', color: TXT.secondary }}>Pause</span></div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><div style={{ width: '10px', height: '5px', background: '#fca5a5', borderRadius: '1px' }} /><span style={{ fontSize: '9px', color: TXT.secondary }}>Congé</span></div>
-              </div>
-            </div>
-          </main>
-
-          {/* Panel */}
-          {editPanelOpen && selectedEmp && (
-            <aside style={{ width: '240px', background: 'white', borderLeft: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column' }}>
-              <header style={{ padding: '8px 10px', borderBottom: '1px solid #e2e8f0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <div style={{ width: '28px', height: '28px', borderRadius: '5px', background: getRoleColor(selectedEmp.fonction), color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '600', fontSize: '10px' }}>{selectedEmp.initiales}</div>
-                    <div>
-                      <h3 style={{ fontSize: '12px', fontWeight: '600', margin: 0, color: TXT.primary }}>{selectedEmp.prenom} {selectedEmp.nom}</h3>
-                      <span style={{ fontSize: '9px', color: getRoleColor(selectedEmp.fonction), fontWeight: '500' }}>{getRoleLabel(selectedEmp.fonction)}</span>
-                    </div>
-                  </div>
-                  <button onClick={closeEdit} style={{ width: '20px', height: '20px', borderRadius: '3px', border: 'none', background: '#f1f5f9', cursor: 'pointer', fontSize: '10px', color: TXT.primary }}>✕</button>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px', background: '#f9fafb', borderRadius: '4px' }}>
-                  <button onClick={goToPrevWeek} style={{ padding: '2px 6px', background: 'white', border: '1px solid #d1d5db', borderRadius: '3px', cursor: 'pointer', fontSize: '10px' }}>←</button>
-                  <span style={{ fontSize: '10px', fontWeight: '500', color: TXT.primary }}>{formatWeekRange(weekStart)}</span>
-                  <button onClick={goToToday} style={{ padding: '2px 6px', background: '#dbeafe', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '9px', color: '#2563eb' }}>Auj.</button>
-                  <button onClick={goToNextWeek} style={{ padding: '2px 6px', background: 'white', border: '1px solid #d1d5db', borderRadius: '3px', cursor: 'pointer', fontSize: '10px' }}>→</button>
-                </div>
-              </header>
-              <div style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px' }}>
-                  <button onClick={() => setModalType('add-slot')} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #d1d5db', background: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}><span style={{ fontSize: '14px' }}>➕</span><span style={{ fontSize: '9px', fontWeight: '500', color: TXT.primary }}>Créneau</span></button>
-                  <button onClick={() => setModalType('add-pause')} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #d1d5db', background: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}><span style={{ fontSize: '14px' }}>☕</span><span style={{ fontSize: '9px', fontWeight: '500', color: TXT.primary }}>Pause</span></button>
-                  <button
-                    onClick={() => {
-                      setEditingCongeId(null)
-                      setCongeToDelete(null)
-                      setCongeData({ dateDebut: currentWeekDates[selectedDay], dateFin: currentWeekDates[selectedDay], motif: '' })
-                      setModalType('add-conge')
+                  ))}
+                  <div
+                    style={{
+                      width: 0,
+                      position: 'relative',
                     }}
-                    style={{ padding: '8px', borderRadius: '4px', border: '1px solid #fca5a5', background: '#fef2f2', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}
                   >
-                    <span style={{ fontSize: '14px' }}>🏖️</span>
-                    <span style={{ fontSize: '9px', fontWeight: '500', color: '#dc2626' }}>Congé</span>
-                  </button>
-                </div>
-              {/* Congés enregistrés */}
-              <div style={{ marginTop: '10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                  <p style={{ fontSize: '9px', fontWeight: '600', color: TXT.secondary, margin: 0, textTransform: 'uppercase' }}>Congés enregistrés</p>
-                  <span style={{ fontSize: '9px', color: TXT.muted }}>
-                    {getEmpCongesForWeek(selectedEmp.id).length}/{leaves.filter(l => l.employeeId === selectedEmp.id).length}
-                  </span>
-                </div>
-
-                {getEmpCongesForWeek(selectedEmp.id).length === 0 ? (
-                  <div style={{ padding: '10px', borderRadius: '6px', border: '1px dashed #e2e8f0', background: '#fafafa', textAlign: 'center', color: TXT.muted, fontSize: '10px' }}>
-                    Aucun congé sur cette semaine
+                    <span
+                      style={{
+                        position: 'absolute',
+                        left: '100%',
+                        top: 0,
+                        transform: 'translateX(-50%)',
+                        fontSize: '9px',
+                        color: TXT.secondary,
+                        fontWeight: '800',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {formatHourLabel(END_HOUR)}
+                    </span>
                   </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    {getEmpCongesForWeek(selectedEmp.id).map(c => (
-                      <div key={c.id} style={{ padding: '8px', borderRadius: '4px', background: '#fef2f2', border: '1px solid #fca5a5' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
-                          <div style={{ minWidth: 0 }}>
-                            <p style={{ fontWeight: '600', color: TXT.primary, margin: 0, fontSize: '11px' }}>Du {c.startDate} au {c.endDate}</p>
-                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '2px' }}>
-                              <span style={{ padding: '2px 6px', background: '#fee2e2', color: '#dc2626', borderRadius: '999px', fontSize: '9px', fontWeight: '600' }}>🏖️ Congé</span>
-                              {c.motif && (
-                                <span style={{ fontSize: '9px', color: '#991b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.motif}</span>
-                              )}
+                </div>
+              </div>
+
+              {/* Rows */}
+              {filteredRoles.map(role => {
+                const emps = empByRole[role]
+                if (emps.length === 0 && role !== 'Etudiant') return null
+                const isCollapsed = collapsedRoles.has(role)
+                return (
+                  <div key={role}>
+                    <div onClick={() => toggleRole(role)} style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 6px', background: '#f3f4f6', borderBottom: '1px solid #e2e8f0', cursor: 'pointer', userSelect: 'none' }}>
+                      <span style={{ fontSize: '9px', color: TXT.muted }}>{isCollapsed ? '▶' : '▼'}</span>
+                      <span style={{ fontSize: '12px' }}>{getRoleIcon(role)}</span>
+                      <span style={{ fontWeight: '600', color: TXT.primary, fontSize: '11px' }}>{getRoleLabel(role)}s</span>
+                      <span style={{ padding: '1px 5px', background: 'white', borderRadius: '8px', fontSize: '9px', color: TXT.secondary, border: '1px solid #e2e8f0' }}>{emps.length}</span>
+                    </div>
+                    {!isCollapsed && emps.map(emp => {
+                      const empSlots = getEmpSlots(emp.id), workSlots = empSlots.filter(s => s.type === 'work'), pauseSlots = empSlots.filter(s => s.type === 'pause'), isWorking = workSlots.length > 0, color = (emp.fonction === 'Etudiant' ? '#122041ff' : ROLE_COLORS[emp.fonction])
+                      return (
+                        <div key={emp.id} onClick={() => openEdit(emp)} style={{ display: 'flex', borderBottom: '1px solid #f3f4f6', cursor: 'pointer' }} onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'} onMouseLeave={e => e.currentTarget.style.background = 'white'}>
+                          <div style={{ width: `${EMP_COL_W}px`, padding: '4px', display: 'flex', alignItems: 'center', gap: '4px', borderRight: '1px solid #f1f5f9' }}>
+                            <div style={{ width: '22px', height: '22px', borderRadius: '4px', background: isWorking ? color : '#e5e7eb', color: isWorking ? 'white' : TXT.muted, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '9px', flexShrink: 0 }}>{emp.initiales}</div>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontWeight: '700', color: TXT.primary, fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{emp.prenom}</div>
+                              <div style={{ fontSize: '9px', color: isWorking ? TXT.secondary : TXT.link, fontWeight: isWorking ? '600' : '700' }}>{isWorking ? `${workSlots[0].start_time}→${workSlots[0].end_time}` : 'Éditer'}</div>
                             </div>
                           </div>
-                          <div style={{ display: 'flex', gap: '3px', flexShrink: 0 }}>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setEditingCongeId(c.id)
-                                setCongeToDelete(null)
-                                setCongeData({ dateDebut: c.startDate, dateFin: c.endDate, motif: c.motif || '' })
-                                setModalType('add-conge')
-                              }}
-                              style={{ padding: '3px 5px', background: 'white', border: '1px solid #d1d5db', borderRadius: '2px', cursor: 'pointer', fontSize: '9px' }}
-                              title="Modifier"
-                            >
-                              ✏️
-                            </button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setCongeToDelete(c); setModalType('delete-conge-confirm') }}
-                              style={{ padding: '3px 5px', background: '#fee2e2', border: 'none', borderRadius: '2px', cursor: 'pointer', fontSize: '9px' }}
-                              title="Supprimer"
-                            >
-                              🗑️
-                            </button>
+                          <div style={{ flex: 1, position: 'relative', height: '36px' }}>
+                            <div style={{ position: 'absolute', inset: 0, display: 'flex' }}>
+                              {HOURS.slice(0, -1).map(h => (
+                                <div
+                                  key={h}
+                                  style={{
+                                    flex: 1,
+                                    borderRight: '1px solid #f5f5f5',
+                                    background: isLunchCol(h) ? 'rgba(254,249,195,0.3)' : 'transparent',
+                                  }}
+                                />
+                              ))}
+                            </div>
+                            {workSlots.map(s => <div key={s.id} style={{ position: 'absolute', top: '3px', bottom: '3px', left: `${toPct(s.start_time)}%`, width: `${Math.max(toPct(s.end_time) - toPct(s.start_time), 4)}%`, background: color, borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '10px', fontWeight: '600', boxShadow: '0 1px 2px rgba(0,0,0,0.15)', border: '1px solid rgba(255,255,255,0.2)' }}>{toPct(s.end_time) - toPct(s.start_time) > 10 && `${s.start_time}-${s.end_time}`}</div>)}
+                            {pauseSlots.map(s => <div key={s.id} style={{ position: 'absolute', top: '3px', bottom: '3px', left: `${toPct(s.start_time)}%`, width: `${Math.max(toPct(s.end_time) - toPct(s.start_time), 3)}%`, background: '#f59e0b', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '10px', fontWeight: '600', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>☕</div>)}
+                          {isEmployeeOnConge(emp.id, currentWeekDates[selectedDay]) && <div style={{ position: 'absolute', top: '3px', bottom: '3px', left: '0%', width: '100%', background: 'repeating-linear-gradient(45deg, #fecaca, #fecaca 5px, #fca5a5 5px, #fca5a5 10px)', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#991b1b', fontSize: '11px', fontWeight: '700', border: '1px solid #f87171', zIndex: 5 }}>🏖️ Congé</div>}
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
+                    {!isCollapsed && emps.length === 0 && role === 'Etudiant' && <div style={{ padding: '10px', textAlign: 'center', color: TXT.muted, fontSize: '10px' }}>👈 Assignez depuis la sidebar</div>}
                   </div>
-                )}
-              </div>
+                )
+              })}
             </div>
 
-            <div style={{ flex: 1, overflow: 'auto', padding: '8px' }}>
-                <p style={{ fontSize: '9px', fontWeight: '600', color: TXT.secondary, margin: '0 0 6px 0', textTransform: 'uppercase' }}>Créneaux {DAYS_SHORT[selectedDay]}</p>
-                {getEmpSlots(selectedEmp.id).length === 0 ? (
-                  <div style={{ padding: '16px', textAlign: 'center', background: '#f9fafb', borderRadius: '6px', border: '1px dashed #e2e8f0' }}><span style={{ fontSize: '20px' }}>📭</span><p style={{ color: TXT.muted, margin: '6px 0 0 0', fontSize: '10px' }}>Aucun</p></div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    {getEmpSlots(selectedEmp.id).filter(s => s.type === 'work').map(slot => (
-                      <div key={slot.id} onClick={() => { setEditingSlot(slot); setModalType('edit-slot') }} style={{ padding: '8px', borderRadius: '4px', background: '#eff6ff', border: '1px solid #bfdbfe', cursor: 'pointer' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div><p style={{ fontWeight: '600', color: TXT.primary, margin: 0, fontSize: '11px' }}>{slot.start_time} - {slot.end_time}</p><p style={{ fontSize: '9px', color: '#2563eb', margin: '1px 0 0 0', fontWeight: '500' }}>🏢 Travail</p></div>
-                          <div style={{ display: 'flex', gap: '3px' }}>
-                            <button onClick={e => { e.stopPropagation(); setEditingSlot(slot); setModalType('edit-slot') }} style={{ padding: '3px 5px', background: 'white', border: '1px solid #d1d5db', borderRadius: '2px', cursor: 'pointer', fontSize: '9px' }}>✏️</button>
-                            <button onClick={e => { e.stopPropagation(); setEditingSlot(slot); setModalType('delete-confirm') }} style={{ padding: '3px 5px', background: '#fee2e2', border: 'none', borderRadius: '2px', cursor: 'pointer', fontSize: '9px' }}>🗑️</button>
+            {/* Légende */}
+            <div style={{ marginTop: '6px', padding: '4px 8px', background: '#f9fafb', borderRadius: '4px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+              {ROLE_ORDER.map(r => <div key={r} style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><div style={{ width: '10px', height: '5px', background: ROLE_COLORS[r], borderRadius: '1px' }} /><span style={{ fontSize: '9px', color: TXT.secondary }}>{getRoleLabel(r)}</span></div>)}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><div style={{ width: '10px', height: '5px', background: '#f59e0b', borderRadius: '1px' }} /><span style={{ fontSize: '9px', color: TXT.secondary }}>Pause</span></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><div style={{ width: '10px', height: '5px', background: '#fca5a5', borderRadius: '1px' }} /><span style={{ fontSize: '9px', color: TXT.secondary }}>Congé</span></div>
+            </div>
+          </div>
+        </main>
+
+        {/* Panel */}
+        {editPanelOpen && selectedEmp && (
+          <aside style={{ width: '240px', background: 'white', borderLeft: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column' }}>
+            <header style={{ padding: '8px 10px', borderBottom: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ width: '28px', height: '28px', borderRadius: '5px', background: getRoleColor(selectedEmp.fonction), color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '600', fontSize: '10px' }}>{selectedEmp.initiales}</div>
+                  <div>
+                    <h3 style={{ fontSize: '12px', fontWeight: '600', margin: 0, color: TXT.primary }}>{selectedEmp.prenom} {selectedEmp.nom}</h3>
+                    <span style={{ fontSize: '9px', color: getRoleColor(selectedEmp.fonction), fontWeight: '500' }}>{getRoleLabel(selectedEmp.fonction)}</span>
+                  </div>
+                </div>
+                <button onClick={closeEdit} style={{ width: '20px', height: '20px', borderRadius: '3px', border: 'none', background: '#f1f5f9', cursor: 'pointer', fontSize: '10px', color: TXT.primary }}>✕</button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px', background: '#f9fafb', borderRadius: '4px' }}>
+                <button onClick={goToPrevWeek} style={{ padding: '2px 6px', background: 'white', border: '1px solid #d1d5db', borderRadius: '3px', cursor: 'pointer', fontSize: '10px' }}>←</button>
+                <span style={{ fontSize: '10px', fontWeight: '500', color: TXT.primary }}>{formatWeekRange(weekStart)}</span>
+                <button onClick={goToToday} style={{ padding: '2px 6px', background: '#dbeafe', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '9px', color: '#2563eb' }}>Auj.</button>
+                <button onClick={goToNextWeek} style={{ padding: '2px 6px', background: 'white', border: '1px solid #d1d5db', borderRadius: '3px', cursor: 'pointer', fontSize: '10px' }}>→</button>
+              </div>
+            </header>
+            <div style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px' }}>
+                <button onClick={() => setModalType('add-slot')} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #d1d5db', background: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}><span style={{ fontSize: '14px' }}>➕</span><span style={{ fontSize: '9px', fontWeight: '500', color: TXT.primary }}>Créneau</span></button>
+                <button onClick={() => setModalType('add-pause')} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #d1d5db', background: 'white', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}><span style={{ fontSize: '14px' }}>☕</span><span style={{ fontSize: '9px', fontWeight: '500', color: TXT.primary }}>Pause</span></button>
+                <button
+                  onClick={() => {
+                    setEditingCongeId(null)
+                    setCongeToDelete(null)
+                    setCongeData({ dateDebut: currentWeekDates[selectedDay], dateFin: currentWeekDates[selectedDay], motif: '' })
+                    setModalType('add-conge')
+                  }}
+                  style={{ padding: '8px', borderRadius: '4px', border: '1px solid #fca5a5', background: '#fef2f2', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}
+                >
+                  <span style={{ fontSize: '14px' }}>🏖️</span>
+                  <span style={{ fontSize: '9px', fontWeight: '500', color: '#dc2626' }}>Congé</span>
+                </button>
+              </div>
+            {/* Congés enregistrés */}
+            <div style={{ marginTop: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <p style={{ fontSize: '9px', fontWeight: '600', color: TXT.secondary, margin: 0, textTransform: 'uppercase' }}>Congés enregistrés</p>
+                <span style={{ fontSize: '9px', color: TXT.muted }}>
+                  {getEmpCongesForWeek(selectedEmp.id).length}/{leaves.filter(l => l.employeeId === selectedEmp.id).length}
+                </span>
+              </div>
+
+              {getEmpCongesForWeek(selectedEmp.id).length === 0 ? (
+                <div style={{ padding: '10px', borderRadius: '6px', border: '1px dashed #e2e8f0', background: '#fafafa', textAlign: 'center', color: TXT.muted, fontSize: '10px' }}>
+                  Aucun congé sur cette semaine
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {getEmpCongesForWeek(selectedEmp.id).map(c => (
+                    <div key={c.id} style={{ padding: '8px', borderRadius: '4px', background: '#fef2f2', border: '1px solid #fca5a5' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <p style={{ fontWeight: '600', color: TXT.primary, margin: 0, fontSize: '11px' }}>Du {c.startDate} au {c.endDate}</p>
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '2px' }}>
+                            <span style={{ padding: '2px 6px', background: '#fee2e2', color: '#dc2626', borderRadius: '999px', fontSize: '9px', fontWeight: '600' }}>🏖️ Congé</span>
+                            {c.motif && (
+                              <span style={{ fontSize: '9px', color: '#991b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.motif}</span>
+                            )}
                           </div>
                         </div>
-                      </div>
-                    ))}
-                    {getEmpSlots(selectedEmp.id).filter(s => s.type === 'pause').map(slot => (
-                      <div key={slot.id} style={{ padding: '8px', borderRadius: '4px', background: '#fffbeb', border: '1px solid #fde68a' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div><p style={{ fontWeight: '600', color: TXT.primary, margin: 0, fontSize: '11px' }}>{slot.start_time} - {slot.end_time}</p><p style={{ fontSize: '9px', color: '#d97706', margin: '1px 0 0 0', fontWeight: '500' }}>☕ Pause</p></div>
-                          <button onClick={() => { setEditingSlot(slot); setModalType('delete-confirm') }} style={{ padding: '3px 5px', background: '#fee2e2', border: 'none', borderRadius: '2px', cursor: 'pointer', fontSize: '9px' }}>🗑️</button>
+                        <div style={{ display: 'flex', gap: '3px', flexShrink: 0 }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setEditingCongeId(c.id)
+                              setCongeToDelete(null)
+                              setCongeData({ dateDebut: c.startDate, dateFin: c.endDate, motif: c.motif || '' })
+                              setModalType('add-conge')
+                            }}
+                            style={{ padding: '3px 5px', background: 'white', border: '1px solid #d1d5db', borderRadius: '2px', cursor: 'pointer', fontSize: '9px' }}
+                            title="Modifier"
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setCongeToDelete(c); setModalType('delete-conge-confirm') }}
+                            style={{ padding: '3px 5px', background: '#fee2e2', border: 'none', borderRadius: '2px', cursor: 'pointer', fontSize: '9px' }}
+                            title="Supprimer"
+                          >
+                            🗑️
+                          </button>
                         </div>
                       </div>
-                    ))}
-                    {getEmpSlots(selectedEmp.id).filter(s => s.type === 'conge').map(slot => (
-                      <div key={slot.id} style={{ padding: '8px', borderRadius: '4px', background: '#fef2f2', border: '1px solid #fca5a5' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div><p style={{ fontWeight: '600', color: TXT.primary, margin: 0, fontSize: '11px' }}>{slot.start_time} - {slot.end_time}</p><p style={{ fontSize: '9px', color: '#dc2626', margin: '1px 0 0 0', fontWeight: '500' }}>🏖️ Congé</p></div>
-                          <button onClick={() => { setEditingSlot(slot); setModalType('delete-confirm') }} style={{ padding: '3px 5px', background: '#fee2e2', border: 'none', borderRadius: '2px', cursor: 'pointer', fontSize: '9px' }}>🗑️</button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </aside>
-          )}
-        </div>
-      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
 
-      {activeView === 'recap' && <div style={{ padding: '16px' }}><h2 style={{ color: TXT.primary, fontSize: '16px' }}>📊 Récapitulatif</h2><button onClick={() => setActiveView('day')} style={{ marginTop: '10px', padding: '6px 12px', background: 'white', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', color: TXT.primary, fontWeight: '500', fontSize: '12px' }}>← Retour</button></div>}
-      {activeView === 'guards' && <div style={{ padding: '16px' }}><h2 style={{ color: TXT.primary, fontSize: '16px' }}>🌙 Gardes</h2><button onClick={() => setActiveView('day')} style={{ marginTop: '10px', padding: '6px 12px', background: 'white', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', color: TXT.primary, fontWeight: '500', fontSize: '12px' }}>← Retour</button></div>}
+          <div style={{ flex: 1, overflow: 'auto', padding: '8px' }}>
+              <p style={{ fontSize: '9px', fontWeight: '600', color: TXT.secondary, margin: '0 0 6px 0', textTransform: 'uppercase' }}>Créneaux {DAYS_SHORT[selectedDay]}</p>
+              {getEmpSlots(selectedEmp.id).length === 0 ? (
+                <div style={{ padding: '16px', textAlign: 'center', background: '#f9fafb', borderRadius: '6px', border: '1px dashed #e2e8f0' }}><span style={{ fontSize: '20px' }}>📭</span><p style={{ color: TXT.muted, margin: '6px 0 0 0', fontSize: '10px' }}>Aucun</p></div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {getEmpSlots(selectedEmp.id).filter(s => s.type === 'work').map(slot => (
+                    <div key={slot.id} onClick={() => { setEditingSlot(slot); setModalType('edit-slot') }} style={{ padding: '8px', borderRadius: '4px', background: '#eff6ff', border: '1px solid #bfdbfe', cursor: 'pointer' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div><p style={{ fontWeight: '600', color: TXT.primary, margin: 0, fontSize: '11px' }}>{slot.start_time} - {slot.end_time}</p><p style={{ fontSize: '9px', color: '#2563eb', margin: '1px 0 0 0', fontWeight: '500' }}>🏢 Travail</p></div>
+                        <div style={{ display: 'flex', gap: '3px' }}>
+                          <button onClick={e => { e.stopPropagation(); setEditingSlot(slot); setModalType('edit-slot') }} style={{ padding: '3px 5px', background: 'white', border: '1px solid #d1d5db', borderRadius: '2px', cursor: 'pointer', fontSize: '9px' }}>✏️</button>
+                          <button onClick={e => { e.stopPropagation(); setEditingSlot(slot); setModalType('delete-confirm') }} style={{ padding: '3px 5px', background: '#fee2e2', border: 'none', borderRadius: '2px', cursor: 'pointer', fontSize: '9px' }}>🗑️</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {getEmpSlots(selectedEmp.id).filter(s => s.type === 'pause').map(slot => (
+                    <div key={slot.id} style={{ padding: '8px', borderRadius: '4px', background: '#fffbeb', border: '1px solid #fde68a' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div><p style={{ fontWeight: '600', color: TXT.primary, margin: 0, fontSize: '11px' }}>{slot.start_time} - {slot.end_time}</p><p style={{ fontSize: '9px', color: '#d97706', margin: '1px 0 0 0', fontWeight: '500' }}>☕ Pause</p></div>
+                        <button onClick={() => { setEditingSlot(slot); setModalType('delete-confirm') }} style={{ padding: '3px 5px', background: '#fee2e2', border: 'none', borderRadius: '2px', cursor: 'pointer', fontSize: '9px' }}>🗑️</button>
+                      </div>
+                    </div>
+                  ))}
+                  {getEmpSlots(selectedEmp.id).filter(s => s.type === 'conge').map(slot => (
+                    <div key={slot.id} style={{ padding: '8px', borderRadius: '4px', background: '#fef2f2', border: '1px solid #fca5a5' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div><p style={{ fontWeight: '600', color: TXT.primary, margin: 0, fontSize: '11px' }}>{slot.start_time} - {slot.end_time}</p><p style={{ fontSize: '9px', color: '#dc2626', margin: '1px 0 0 0', fontWeight: '500' }}>🏖️ Congé</p></div>
+                        <button onClick={() => { setEditingSlot(slot); setModalType('delete-confirm') }} style={{ padding: '3px 5px', background: '#fee2e2', border: 'none', borderRadius: '2px', cursor: 'pointer', fontSize: '9px' }}>🗑️</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </aside>
+        )}
+      </div>
 
       {/* Modals */}
       {modalType === 'add-slot' && (
