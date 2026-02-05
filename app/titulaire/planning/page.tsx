@@ -124,24 +124,8 @@ const addMins = (t: string, mins: number) => {
 }
 const normTime = (t: string) => t.replace('h', ':').replace(/:(\d)(?!\d)/g, ':0$1').padStart(5, '0')
 
-const initPlanning = (): Record<string, PlanningSlot[]> => {
-  // 1. Essayer de charger le planning appliqué par l'assistant
-  const applied = getAppliedPlanning()
-  if (applied) {
-    const p: Record<string, PlanningSlot[]> = {}
-    JOURS_SEMAINE.forEach(j => {
-      p[j] = (applied.slots[j] || []).map(s => ({
-        id: s.id,
-        employee_id: s.employee_id,
-        start_time: s.start_time,
-        end_time: s.end_time,
-        type: s.type as 'work' | 'pause' | 'conge'
-      }))
-    })
-    return p
-  }
-
-  // 2. Fallback : données mock
+// Build base planning from mock data (stable, no localStorage — used for SSR)
+const initPlanningMock = (): Record<string, PlanningSlot[]> => {
   const p: Record<string, PlanningSlot[]> = {}
   JOURS_SEMAINE.forEach(j => {
     const s: PlanningSlot[] = []
@@ -157,6 +141,25 @@ const initPlanning = (): Record<string, PlanningSlot[]> => {
   return p
 }
 
+// Load applied planning from localStorage (client-only)
+const loadAppliedPlanning = (): Record<string, PlanningSlot[]> | null => {
+  const applied = getAppliedPlanning()
+  if (applied) {
+    const p: Record<string, PlanningSlot[]> = {}
+    JOURS_SEMAINE.forEach(j => {
+      p[j] = (applied.slots[j] || []).map(s => ({
+        id: s.id,
+        employee_id: s.employee_id,
+        start_time: s.start_time,
+        end_time: s.end_time,
+        type: s.type as 'work' | 'pause' | 'conge'
+      }))
+    })
+    return p
+  }
+  return null
+}
+
 // ============================================================
 // Page
 // ============================================================
@@ -169,7 +172,12 @@ export default function PlanningPage() {
   const goToPrevWeek = () => setWeekStart(prev => addWeeks(prev, -1))
   const goToNextWeek = () => setWeekStart(prev => addWeeks(prev, 1))
   const goToToday = () => { setWeekStart(getWeekStart(new Date())); setSelectedDay(0) }
-  const [slots, setSlots] = useState<Record<string, PlanningSlot[]>>(() => initPlanning())
+  const [slots, setSlots] = useState<Record<string, PlanningSlot[]>>(() => initPlanningMock())
+  // Load applied planning from localStorage on client mount (avoids hydration mismatch)
+  useEffect(() => {
+    const applied = loadAppliedPlanning()
+    if (applied) setSlots(applied)
+  }, [])
   const [studentStates, setStudentStates] = useState<Record<string, StudentCardState>>({})
   const [toast, setToast] = useState<string | null>(null)
   const [selectedEmp, setSelectedEmp] = useState<MockEmployee | null>(null)

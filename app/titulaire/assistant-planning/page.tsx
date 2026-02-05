@@ -35,10 +35,18 @@ interface DayNeed {
   dayLabel: string
   dayIdx: number
   enabled: boolean
-  startTime: string
-  endTime: string
-  minStudents: number
-  maxStudents: number
+  // Shift Matin
+  morningEnabled: boolean
+  morningStart: string
+  morningEnd: string
+  minStudentsMorning: number
+  maxStudentsMorning: number
+  // Shift Après-midi
+  afternoonEnabled: boolean
+  afternoonStart: string
+  afternoonEnd: string
+  minStudentsAfternoon: number
+  maxStudentsAfternoon: number
 }
 
 interface GeneratedAssignment {
@@ -50,6 +58,7 @@ interface GeneratedAssignment {
   startTime: string
   endTime: string
   hours: number
+  shift: 'morning' | 'afternoon'
 }
 
 interface GeneratedPlan {
@@ -61,6 +70,10 @@ interface GeneratedPlan {
     coverageRate: number
     avgHoursPerStudent: number
     warnings: string[]
+    morningSlots: number
+    afternoonSlots: number
+    morningCoverage: number
+    afternoonCoverage: number
   }
   byStudent: Record<string, { name: string; initiales: string; totalHours: number; days: string[]; minH: number; maxH: number }>
   byDay: Record<string, GeneratedAssignment[]>
@@ -80,6 +93,58 @@ const DAYS = [
 ]
 
 const PALETTE = ROLE_PALETTE.Etudiant
+
+// ============================================================
+// SHIFT TEMPLATES
+// ============================================================
+
+interface DayTemplate {
+  id: string
+  label: string
+  icon: string
+  description: string
+  morningEnabled: boolean
+  minStudentsMorning: number
+  maxStudentsMorning: number
+  afternoonEnabled: boolean
+  minStudentsAfternoon: number
+  maxStudentsAfternoon: number
+}
+
+const DAY_TEMPLATES: DayTemplate[] = [
+  {
+    id: 'lundi-classique',
+    label: 'Lundi classique',
+    icon: '📋',
+    description: 'Matin chargé (ordonnances weekend)',
+    morningEnabled: true, minStudentsMorning: 2, maxStudentsMorning: 3,
+    afternoonEnabled: true, minStudentsAfternoon: 1, maxStudentsAfternoon: 2,
+  },
+  {
+    id: 'equilibree',
+    label: 'Équilibrée',
+    icon: '⚖️',
+    description: 'Matin et après-midi équilibrés',
+    morningEnabled: true, minStudentsMorning: 2, maxStudentsMorning: 3,
+    afternoonEnabled: true, minStudentsAfternoon: 2, maxStudentsAfternoon: 3,
+  },
+  {
+    id: 'pic-aprem',
+    label: 'Pic après-midi',
+    icon: '🌆',
+    description: 'Sortie du travail 16h-19h',
+    morningEnabled: true, minStudentsMorning: 1, maxStudentsMorning: 2,
+    afternoonEnabled: true, minStudentsAfternoon: 3, maxStudentsAfternoon: 4,
+  },
+  {
+    id: 'samedi-charge',
+    label: 'Samedi chargé',
+    icon: '🛒',
+    description: 'Matin renforcé, après-midi léger',
+    morningEnabled: true, minStudentsMorning: 3, maxStudentsMorning: 4,
+    afternoonEnabled: true, minStudentsAfternoon: 1, maxStudentsAfternoon: 2,
+  },
+]
 
 // ============================================================
 // DATA HELPERS
@@ -181,33 +246,57 @@ function generatePlanning(
     studentMinH[s.id] = s.minHours
   })
 
-  // Sort needs by number of available students (hardest to fill first)
-  const sortedNeeds = [...activeNeeds].sort((a, b) => {
+  // Expand each day into up to 2 shift-slots (morning + afternoon)
+  interface ShiftSlot {
+    day: string; dayLabel: string; shift: 'morning' | 'afternoon'
+    startTime: string; endTime: string
+    minStudents: number; maxStudents: number
+  }
+  const shiftSlots: ShiftSlot[] = []
+  for (const need of activeNeeds) {
+    if (need.morningEnabled) {
+      shiftSlots.push({
+        day: need.day, dayLabel: need.dayLabel, shift: 'morning',
+        startTime: need.morningStart, endTime: need.morningEnd,
+        minStudents: need.minStudentsMorning, maxStudents: need.maxStudentsMorning,
+      })
+    }
+    if (need.afternoonEnabled) {
+      shiftSlots.push({
+        day: need.day, dayLabel: need.dayLabel, shift: 'afternoon',
+        startTime: need.afternoonStart, endTime: need.afternoonEnd,
+        minStudents: need.minStudentsAfternoon, maxStudents: need.maxStudentsAfternoon,
+      })
+    }
+  }
+
+  // Sort by difficulty (fewest available students first)
+  const sortedSlots = [...shiftSlots].sort((a, b) => {
     const availA = activeStudents.filter(s => isAvailableForSlot(s.disponibilites[a.day], a.startTime, a.endTime)).length
     const availB = activeStudents.filter(s => isAvailableForSlot(s.disponibilites[b.day], b.startTime, b.endTime)).length
     return availA - availB
   })
 
-  for (const need of sortedNeeds) {
-    const [sH, sM] = need.startTime.split(':').map(Number)
-    const [eH, eM] = need.endTime.split(':').map(Number)
+  for (const slot of sortedSlots) {
+    const [sH, sM] = slot.startTime.split(':').map(Number)
+    const [eH, eM] = slot.endTime.split(':').map(Number)
     const slotHours = ((eH * 60 + eM) - (sH * 60 + sM)) / 60
 
-    // Find available students for this slot (respecting maxHours)
+    // Find available students for this shift-slot
+    // Key change: duplicate check uses (day + shift), not just day
+    // A 'journee' student CAN work both morning AND afternoon
     const available = activeStudents.filter(s =>
-      isAvailableForSlot(s.disponibilites[need.day], need.startTime, need.endTime) &&
-      // Don't assign same student twice on same day
-      !assignments.some(a => a.studentId === s.id && a.day === need.day) &&
-      // Respect maxHours constraint (with 10% tolerance)
+      isAvailableForSlot(s.disponibilites[slot.day], slot.startTime, slot.endTime) &&
+      !assignments.some(a => a.studentId === s.id && a.day === slot.day && a.shift === slot.shift) &&
       (studentHours[s.id] || 0) + slotHours <= studentMaxH[s.id] * 1.1
     )
 
-    // Check minimum coverage
-    if (available.length < need.minStudents) {
-      warnings.push(`${need.dayLabel}: seulement ${available.length} étudiants disponibles (min. ${need.minStudents} requis)`)
+    if (available.length < slot.minStudents) {
+      const shiftLabel = slot.shift === 'morning' ? 'Matin' : 'Après-midi'
+      warnings.push(`${slot.dayLabel} ${shiftLabel}: seulement ${available.length} étudiants disponibles (min. ${slot.minStudents} requis)`)
     }
 
-    // Sort by hours (least hours first for balancing — prioritize under-minHours students)
+    // Sort: under-minHours first, then least hours
     available.sort((a, b) => {
       const aUnder = (studentHours[a.id] || 0) < studentMinH[a.id] ? 0 : 1
       const bUnder = (studentHours[b.id] || 0) < studentMinH[b.id] ? 0 : 1
@@ -215,9 +304,7 @@ function generatePlanning(
       return (studentHours[a.id] || 0) - (studentHours[b.id] || 0)
     })
 
-    // Assign between minStudents and maxStudents
-    // First ensure minimum, then try to reach max if students are available
-    const targetCount = Math.min(need.maxStudents, available.length)
+    const targetCount = Math.min(slot.maxStudents, available.length)
     const toAssign = available.slice(0, targetCount)
 
     for (const student of toAssign) {
@@ -225,13 +312,13 @@ function generatePlanning(
         studentId: student.id,
         studentName: `${student.prenom} ${student.nom}`.trim(),
         studentInitiales: student.initiales,
-        day: need.day,
-        dayLabel: need.dayLabel,
-        startTime: need.startTime,
-        endTime: need.endTime,
+        day: slot.day,
+        dayLabel: slot.dayLabel,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
         hours: slotHours,
+        shift: slot.shift,
       })
-
       studentHours[student.id] = (studentHours[student.id] || 0) + slotHours
     }
   }
@@ -255,7 +342,9 @@ function generatePlanning(
       byStudent[a.studentId] = { name: a.studentName, initiales: a.studentInitiales, totalHours: 0, days: [], minH: stu?.minHours ?? 4, maxH: stu?.maxHours ?? 20 }
     }
     byStudent[a.studentId].totalHours += a.hours
-    byStudent[a.studentId].days.push(a.dayLabel)
+    if (!byStudent[a.studentId].days.includes(a.dayLabel)) {
+      byStudent[a.studentId].days.push(a.dayLabel)
+    }
   })
 
   // Build byDay
@@ -266,22 +355,28 @@ function generatePlanning(
     byDay[a.day].push(a)
   })
 
-  // Stats — use maxStudents as reference for total slots
-  const totalSlots = activeNeeds.reduce((s, n) => s + n.maxStudents, 0)
-  const minSlots = activeNeeds.reduce((s, n) => s + n.minStudents, 0)
+  // Stats with shift breakdown
+  const morningAssignments = assignments.filter(a => a.shift === 'morning')
+  const afternoonAssignments = assignments.filter(a => a.shift === 'afternoon')
+  const minMorningSlots = shiftSlots.filter(s => s.shift === 'morning').reduce((sum, s) => sum + s.minStudents, 0)
+  const minAfternoonSlots = shiftSlots.filter(s => s.shift === 'afternoon').reduce((sum, s) => sum + s.minStudents, 0)
+  const totalMinSlots = minMorningSlots + minAfternoonSlots
   const assignedStudents = new Set(assignments.map(a => a.studentId))
   const totalHours = assignments.reduce((s, a) => s + a.hours, 0)
-  const coverageRate = minSlots > 0 ? Math.min(100, Math.round((assignments.length / minSlots) * 100)) : 0
 
   return {
     assignments,
     stats: {
-      totalSlots,
+      totalSlots: assignments.length,
       totalStudents: assignedStudents.size,
       totalHours: Math.round(totalHours * 10) / 10,
-      coverageRate,
+      coverageRate: totalMinSlots > 0 ? Math.min(100, Math.round((assignments.length / totalMinSlots) * 100)) : 0,
       avgHoursPerStudent: assignedStudents.size > 0 ? Math.round((totalHours / assignedStudents.size) * 10) / 10 : 0,
       warnings,
+      morningSlots: morningAssignments.length,
+      afternoonSlots: afternoonAssignments.length,
+      morningCoverage: minMorningSlots > 0 ? Math.min(100, Math.round((morningAssignments.length / minMorningSlots) * 100)) : 0,
+      afternoonCoverage: minAfternoonSlots > 0 ? Math.min(100, Math.round((afternoonAssignments.length / minAfternoonSlots) * 100)) : 0,
     },
     byStudent,
     byDay,
@@ -305,19 +400,26 @@ export default function AssistantPlanningPage() {
     return getWeekStart(d)
   })
 
-  // Step 2: Needs
+  // Step 2: Needs (with morning/afternoon shifts)
   const [dayNeeds, setDayNeeds] = useState<DayNeed[]>(() =>
     DAYS.map(d => ({
       day: d.key,
       dayLabel: d.label,
       dayIdx: d.idx,
       enabled: d.idx < 5, // Mon-Fri enabled by default
-      startTime: '09:00',
-      endTime: '18:00',
-      minStudents: 1,
-      maxStudents: 3,
+      morningEnabled: true,
+      morningStart: '08:30',
+      morningEnd: '14:00',
+      minStudentsMorning: 1,
+      maxStudentsMorning: 2,
+      afternoonEnabled: true,
+      afternoonStart: '14:00',
+      afternoonEnd: '20:30',
+      minStudentsAfternoon: 1,
+      maxStudentsAfternoon: 2,
     }))
   )
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null)
 
   // Step 3: Students
   const [students, setStudents] = useState<StudentAvailability[]>(() => getStudentAvailabilities())
@@ -334,10 +436,10 @@ export default function AssistantPlanningPage() {
   // ── Step navigation ──
   const canGoNext = useMemo(() => {
     if (step === 1) return true
-    if (step === 2) return enabledDays.length > 0
+    if (step === 2) return enabledDays.length > 0 && enabledDays.some(d => d.morningEnabled || d.afternoonEnabled)
     if (step === 3) return enabledStudents.length > 0
     return false
-  }, [step, enabledDays.length, enabledStudents.length])
+  }, [step, enabledDays, enabledStudents.length])
 
   const goNext = () => {
     if (step < 4 && canGoNext) setStep(step + 1)
@@ -389,16 +491,17 @@ export default function AssistantPlanningPage() {
     })
 
     // ── 2. Add generated student slots ──
+    const ts = Date.now()
     generatedPlan.assignments.forEach((a, idx) => {
       slotsPerDay[a.day].push({
-        id: `ast-${Date.now()}-${idx}`,
+        id: `ast-${a.shift}-${ts}-${idx}`,
         employee_id: a.studentId,
         start_time: a.startTime,
         end_time: a.endTime,
         type: 'work',
       })
 
-      // Auto-pause if slot > 6h
+      // Auto-pause if single slot > 6h (e.g. afternoon 14:00-20:30 = 6h30)
       const [sH, sM] = a.startTime.split(':').map(Number)
       const [eH, eM] = a.endTime.split(':').map(Number)
       const durationH = ((eH * 60 + eM) - (sH * 60 + sM)) / 60
@@ -411,13 +514,36 @@ export default function AssistantPlanningPage() {
         const peH = Math.floor((pauseStart + 30) / 60)
         const peM = (pauseStart + 30) % 60
         slotsPerDay[a.day].push({
-          id: `ast-p-${Date.now()}-${idx}`,
+          id: `ast-p-${ts}-${idx}`,
           employee_id: a.studentId,
           start_time: `${ph.toString().padStart(2, '0')}:${pm.toString().padStart(2, '0')}`,
           end_time: `${peH.toString().padStart(2, '0')}:${peM.toString().padStart(2, '0')}`,
           type: 'pause',
         })
       }
+    })
+
+    // ── 2b. Pause déjeuner pour les étudiants qui font matin + après-midi ──
+    // Si un étudiant a un shift matin ET un shift après-midi le même jour,
+    // ajouter une pause de 30 min à la jonction (13:00-13:30)
+    const pauseAdded = new Set<string>()
+    JOURS_SEMAINE.forEach(j => {
+      const dayA = generatedPlan.assignments.filter(a => a.day === j)
+      const morningStudents = dayA.filter(a => a.shift === 'morning').map(a => a.studentId)
+      const afternoonStudents = dayA.filter(a => a.shift === 'afternoon').map(a => a.studentId)
+      const fullDayStudents = morningStudents.filter(id => afternoonStudents.includes(id))
+      fullDayStudents.forEach(studentId => {
+        const key = `${studentId}-${j}`
+        if (pauseAdded.has(key)) return
+        pauseAdded.add(key)
+        slotsPerDay[j].push({
+          id: `ast-lunch-${ts}-${studentId.slice(-4)}-${j}`,
+          employee_id: studentId,
+          start_time: '13:00',
+          end_time: '13:30',
+          type: 'pause',
+        })
+      })
     })
 
     // ── 3. Compute metadata ──
@@ -478,10 +604,26 @@ export default function AssistantPlanningPage() {
   const applyToAll = (source: DayNeed) => {
     setDayNeeds(prev => prev.map(n => n.enabled ? {
       ...n,
-      startTime: source.startTime,
-      endTime: source.endTime,
-      minStudents: source.minStudents,
-      maxStudents: source.maxStudents,
+      morningEnabled: source.morningEnabled,
+      minStudentsMorning: source.minStudentsMorning,
+      maxStudentsMorning: source.maxStudentsMorning,
+      afternoonEnabled: source.afternoonEnabled,
+      minStudentsAfternoon: source.minStudentsAfternoon,
+      maxStudentsAfternoon: source.maxStudentsAfternoon,
+    } : n))
+  }
+
+  // ── Apply template to all enabled days ──
+  const applyTemplate = (tpl: DayTemplate) => {
+    setSelectedTemplate(tpl.id)
+    setDayNeeds(prev => prev.map(n => n.enabled ? {
+      ...n,
+      morningEnabled: tpl.morningEnabled,
+      minStudentsMorning: tpl.minStudentsMorning,
+      maxStudentsMorning: tpl.maxStudentsMorning,
+      afternoonEnabled: tpl.afternoonEnabled,
+      minStudentsAfternoon: tpl.minStudentsAfternoon,
+      maxStudentsAfternoon: tpl.maxStudentsAfternoon,
     } : n))
   }
 
@@ -604,14 +746,37 @@ export default function AssistantPlanningPage() {
             </div>
           )}
 
-          {/* ─── STEP 2: NEEDS ─── */}
+          {/* ─── STEP 2: SHIFTS ─── */}
           {step === 2 && (
             <div className="ap-step-content">
               <div className="ap-step-header">
                 <span className="ap-step-header-icon">⏰</span>
                 <div>
-                  <h2>Besoins en étudiants</h2>
-                  <p>Combien d&apos;étudiants par jour et quels horaires ?</p>
+                  <h2>Besoins par shift</h2>
+                  <p>Configurez vos besoins matin (8h30-14h) et après-midi (14h-20h30)</p>
+                </div>
+              </div>
+
+              {/* Templates rapides */}
+              <div className="ap-templates-section">
+                <div className="ap-templates-label">Templates rapides :</div>
+                <div className="ap-templates-row">
+                  {DAY_TEMPLATES.map(tpl => (
+                    <button
+                      key={tpl.id}
+                      className={`ap-template-card ${selectedTemplate === tpl.id ? 'selected' : ''}`}
+                      onClick={() => applyTemplate(tpl)}
+                      title={tpl.description}
+                    >
+                      <span className="ap-template-icon">{tpl.icon}</span>
+                      <span className="ap-template-label">{tpl.label}</span>
+                      <div className="ap-template-preview">
+                        <span className="ap-tpl-shift morning">🌅 {tpl.minStudentsMorning}-{tpl.maxStudentsMorning}</span>
+                        <span className="ap-tpl-shift afternoon">🌆 {tpl.minStudentsAfternoon}-{tpl.maxStudentsAfternoon}</span>
+                      </div>
+                      <span className="ap-template-desc">{tpl.description}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -629,43 +794,84 @@ export default function AssistantPlanningPage() {
                       </label>
                       {need.enabled && (
                         <button className="ap-need-apply-all" onClick={() => applyToAll(need)} title="Appliquer à tous les jours">
-                          📋 Copier
+                          📋 Copier à tous
                         </button>
                       )}
                     </div>
                     {need.enabled && (
-                      <div className="ap-need-config">
-                        <div className="ap-need-row">
-                          <label>Horaires</label>
-                          <div className="ap-need-times">
-                            <select value={need.startTime} onChange={e => updateNeed(need.day, { startTime: e.target.value })}>
-                              {['08:00','08:30','09:00','09:30','10:00'].map(t => (
-                                <option key={t} value={t}>{t.replace(':', 'h')}</option>
-                              ))}
-                            </select>
-                            <span>→</span>
-                            <select value={need.endTime} onChange={e => updateNeed(need.day, { endTime: e.target.value })}>
-                              {['17:00','17:30','18:00','18:30','19:00','19:30','20:00'].map(t => (
-                                <option key={t} value={t}>{t.replace(':', 'h')}</option>
-                              ))}
-                            </select>
+                      <div className="ap-shift-pair">
+                        {/* ── Matin ── */}
+                        <div className={`ap-shift-card ${!need.morningEnabled ? 'disabled' : ''}`}>
+                          <div className="ap-shift-header morning">
+                            <label className="ap-shift-toggle">
+                              <input
+                                type="checkbox"
+                                checked={need.morningEnabled}
+                                onChange={() => updateNeed(need.day, { morningEnabled: !need.morningEnabled })}
+                              />
+                              <span>🌅 Matin</span>
+                            </label>
+                            <span className="ap-shift-times">08h30 — 14h00</span>
                           </div>
+                          {need.morningEnabled && (
+                            <div className="ap-shift-body">
+                              <div className="ap-shift-counters">
+                                <div className="ap-shift-counter-row">
+                                  <span className="ap-shift-counter-label">Min</span>
+                                  <div className="ap-need-counter">
+                                    <button onClick={() => updateNeed(need.day, { minStudentsMorning: Math.max(0, need.minStudentsMorning - 1) })}>−</button>
+                                    <span className="ap-need-count morning">{need.minStudentsMorning}</span>
+                                    <button onClick={() => updateNeed(need.day, { minStudentsMorning: Math.min(need.maxStudentsMorning, need.minStudentsMorning + 1) })}>+</button>
+                                  </div>
+                                </div>
+                                <div className="ap-shift-counter-row">
+                                  <span className="ap-shift-counter-label">Max</span>
+                                  <div className="ap-need-counter">
+                                    <button onClick={() => updateNeed(need.day, { maxStudentsMorning: Math.max(need.minStudentsMorning, need.maxStudentsMorning - 1) })}>−</button>
+                                    <span className="ap-need-count morning">{need.maxStudentsMorning}</span>
+                                    <button onClick={() => updateNeed(need.day, { maxStudentsMorning: Math.min(8, need.maxStudentsMorning + 1) })}>+</button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className="ap-need-row">
-                          <label>Min</label>
-                          <div className="ap-need-counter">
-                            <button onClick={() => updateNeed(need.day, { minStudents: Math.max(0, need.minStudents - 1) })}>−</button>
-                            <span className="ap-need-count">{need.minStudents}</span>
-                            <button onClick={() => updateNeed(need.day, { minStudents: Math.min(need.maxStudents, need.minStudents + 1) })}>+</button>
+
+                        {/* ── Après-midi ── */}
+                        <div className={`ap-shift-card ${!need.afternoonEnabled ? 'disabled' : ''}`}>
+                          <div className="ap-shift-header afternoon">
+                            <label className="ap-shift-toggle">
+                              <input
+                                type="checkbox"
+                                checked={need.afternoonEnabled}
+                                onChange={() => updateNeed(need.day, { afternoonEnabled: !need.afternoonEnabled })}
+                              />
+                              <span>🌆 Après-midi</span>
+                            </label>
+                            <span className="ap-shift-times">14h00 — 20h30</span>
                           </div>
-                        </div>
-                        <div className="ap-need-row">
-                          <label>Max</label>
-                          <div className="ap-need-counter">
-                            <button onClick={() => updateNeed(need.day, { maxStudents: Math.max(need.minStudents, need.maxStudents - 1) })}>−</button>
-                            <span className="ap-need-count max">{need.maxStudents}</span>
-                            <button onClick={() => updateNeed(need.day, { maxStudents: Math.min(8, need.maxStudents + 1) })}>+</button>
-                          </div>
+                          {need.afternoonEnabled && (
+                            <div className="ap-shift-body">
+                              <div className="ap-shift-counters">
+                                <div className="ap-shift-counter-row">
+                                  <span className="ap-shift-counter-label">Min</span>
+                                  <div className="ap-need-counter">
+                                    <button onClick={() => updateNeed(need.day, { minStudentsAfternoon: Math.max(0, need.minStudentsAfternoon - 1) })}>−</button>
+                                    <span className="ap-need-count afternoon">{need.minStudentsAfternoon}</span>
+                                    <button onClick={() => updateNeed(need.day, { minStudentsAfternoon: Math.min(need.maxStudentsAfternoon, need.minStudentsAfternoon + 1) })}>+</button>
+                                  </div>
+                                </div>
+                                <div className="ap-shift-counter-row">
+                                  <span className="ap-shift-counter-label">Max</span>
+                                  <div className="ap-need-counter">
+                                    <button onClick={() => updateNeed(need.day, { maxStudentsAfternoon: Math.max(need.minStudentsAfternoon, need.maxStudentsAfternoon - 1) })}>−</button>
+                                    <span className="ap-need-count afternoon">{need.maxStudentsAfternoon}</span>
+                                    <button onClick={() => updateNeed(need.day, { maxStudentsAfternoon: Math.min(8, need.maxStudentsAfternoon + 1) })}>+</button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -676,8 +882,12 @@ export default function AssistantPlanningPage() {
               {/* Summary */}
               <div className="ap-needs-summary">
                 <div className="ap-needs-stat">
-                  <span className="ap-needs-stat-val">{enabledDays.reduce((s, d) => s + d.minStudents, 0)}–{enabledDays.reduce((s, d) => s + d.maxStudents, 0)}</span>
-                  <span className="ap-needs-stat-label">créneaux/sem</span>
+                  <span className="ap-needs-stat-val">{enabledDays.filter(d => d.morningEnabled).reduce((s, d) => s + d.minStudentsMorning, 0)}–{enabledDays.filter(d => d.morningEnabled).reduce((s, d) => s + d.maxStudentsMorning, 0)}</span>
+                  <span className="ap-needs-stat-label">🌅 matin/sem</span>
+                </div>
+                <div className="ap-needs-stat">
+                  <span className="ap-needs-stat-val">{enabledDays.filter(d => d.afternoonEnabled).reduce((s, d) => s + d.minStudentsAfternoon, 0)}–{enabledDays.filter(d => d.afternoonEnabled).reduce((s, d) => s + d.maxStudentsAfternoon, 0)}</span>
+                  <span className="ap-needs-stat-label">🌆 après-midi/sem</span>
                 </div>
                 <div className="ap-needs-stat">
                   <span className="ap-needs-stat-val">{enabledDays.length}</span>
@@ -848,15 +1058,20 @@ export default function AssistantPlanningPage() {
 
                   {/* KPI Cards */}
                   <div className="ap-result-kpis">
-                    <div className="ap-kpi-card success">
-                      <span className="ap-kpi-icon">✓</span>
-                      <span className="ap-kpi-val">{generatedPlan.assignments.length}</span>
-                      <span className="ap-kpi-label">créneaux attribués</span>
+                    <div className="ap-kpi-card" style={{ borderColor: T.warning }}>
+                      <span className="ap-kpi-icon">🌅</span>
+                      <span className="ap-kpi-val">{generatedPlan.stats.morningSlots}</span>
+                      <span className="ap-kpi-label">matin</span>
+                    </div>
+                    <div className="ap-kpi-card" style={{ borderColor: T.info }}>
+                      <span className="ap-kpi-icon">🌆</span>
+                      <span className="ap-kpi-val">{generatedPlan.stats.afternoonSlots}</span>
+                      <span className="ap-kpi-label">après-midi</span>
                     </div>
                     <div className="ap-kpi-card">
                       <span className="ap-kpi-icon">👥</span>
                       <span className="ap-kpi-val">{generatedPlan.stats.totalStudents}</span>
-                      <span className="ap-kpi-label">étudiants planifiés</span>
+                      <span className="ap-kpi-label">étudiants</span>
                     </div>
                     <div className="ap-kpi-card">
                       <span className="ap-kpi-icon">⏱️</span>
@@ -867,6 +1082,7 @@ export default function AssistantPlanningPage() {
                       <span className="ap-kpi-icon">🎯</span>
                       <span className="ap-kpi-val">{generatedPlan.stats.coverageRate}%</span>
                       <span className="ap-kpi-label">couverture</span>
+                      <span className="ap-kpi-sub">🌅{generatedPlan.stats.morningCoverage}% 🌆{generatedPlan.stats.afternoonCoverage}%</span>
                     </div>
                   </div>
 
@@ -886,22 +1102,46 @@ export default function AssistantPlanningPage() {
                     <div className="ap-days-grid">
                       {DAYS.map(d => {
                         const dayAssignments = generatedPlan.byDay[d.key] || []
-                        const isActive = dayNeeds.find(n => n.day === d.key)?.enabled
+                        const need = dayNeeds.find(n => n.day === d.key)
+                        const isActive = need?.enabled
+                        const morningA = dayAssignments.filter(a => a.shift === 'morning')
+                        const afternoonA = dayAssignments.filter(a => a.shift === 'afternoon')
                         return (
                           <div key={d.key} className={`ap-day-col ${!isActive ? 'inactive' : ''}`}>
                             <div className="ap-day-header">{d.short}</div>
                             <div className="ap-day-slots">
                               {isActive ? (
                                 dayAssignments.length > 0 ? (
-                                  dayAssignments.map((a, idx) => (
-                                    <div key={idx} className="ap-day-slot">
-                                      <div className="ap-slot-avatar">{a.studentInitiales}</div>
-                                      <div className="ap-slot-info">
-                                        <span className="ap-slot-name">{a.studentName.split(' ')[0]}</span>
-                                        <span className="ap-slot-time">{a.startTime}-{a.endTime}</span>
-                                      </div>
-                                    </div>
-                                  ))
+                                  <>
+                                    {need?.morningEnabled && morningA.length > 0 && (
+                                      <>
+                                        <div className="ap-day-shift-label morning">🌅 Matin</div>
+                                        {morningA.map((a, idx) => (
+                                          <div key={`m-${idx}`} className="ap-day-slot">
+                                            <div className="ap-slot-avatar">{a.studentInitiales}</div>
+                                            <div className="ap-slot-info">
+                                              <span className="ap-slot-name">{a.studentName.split(' ')[0]}</span>
+                                              <span className="ap-slot-time">{a.startTime}-{a.endTime}</span>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </>
+                                    )}
+                                    {need?.afternoonEnabled && afternoonA.length > 0 && (
+                                      <>
+                                        <div className="ap-day-shift-label afternoon">🌆 Aprem</div>
+                                        {afternoonA.map((a, idx) => (
+                                          <div key={`a-${idx}`} className="ap-day-slot">
+                                            <div className="ap-slot-avatar">{a.studentInitiales}</div>
+                                            <div className="ap-slot-info">
+                                              <span className="ap-slot-name">{a.studentName.split(' ')[0]}</span>
+                                              <span className="ap-slot-time">{a.startTime}-{a.endTime}</span>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </>
+                                    )}
+                                  </>
                                 ) : (
                                   <div className="ap-day-empty">Aucun</div>
                                 )
@@ -1164,7 +1404,54 @@ export default function AssistantPlanningPage() {
           color: ${T.primaryDk};
         }
 
-        /* ═══ STEP 2: NEEDS ═══ */
+        /* ═══ STEP 2: SHIFTS ═══ */
+
+        /* Templates */
+        .ap-templates-section { margin-bottom: 20px; }
+        .ap-templates-label {
+          font-size: 12px;
+          font-weight: 600;
+          color: ${T.textSec};
+          margin-bottom: 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.3px;
+        }
+        .ap-templates-row {
+          display: flex;
+          gap: 10px;
+          overflow-x: auto;
+          padding-bottom: 4px;
+        }
+        .ap-template-card {
+          min-width: 150px;
+          padding: 12px;
+          background: ${T.card};
+          border: 2px solid ${T.border};
+          border-radius: 10px;
+          cursor: pointer;
+          text-align: left;
+          transition: all 0.15s;
+          flex-shrink: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .ap-template-card:hover { border-color: ${T.borderMd}; box-shadow: ${T.shadow}; }
+        .ap-template-card.selected { border-color: ${T.info}; background: ${T.infoBg}; }
+        .ap-template-icon { font-size: 20px; }
+        .ap-template-label { font-size: 13px; font-weight: 700; color: ${T.text}; }
+        .ap-template-preview { display: flex; gap: 6px; }
+        .ap-tpl-shift {
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-size: 10px;
+          font-weight: 600;
+        }
+        .ap-tpl-shift.morning { background: ${T.warningBg}; color: ${T.warningDk}; }
+        .ap-tpl-shift.afternoon { background: ${T.infoBg}; color: ${T.infoDk}; }
+        .ap-template-desc { font-size: 10px; color: ${T.muted}; line-height: 1.3; }
+
+        /* Day cards */
         .ap-needs-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
         .ap-need-card {
           background: ${T.card};
@@ -1178,7 +1465,6 @@ export default function AssistantPlanningPage() {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          margin-bottom: 8px;
         }
         .ap-need-toggle {
           display: flex;
@@ -1198,26 +1484,63 @@ export default function AssistantPlanningPage() {
           cursor: pointer;
         }
         .ap-need-apply-all:hover { background: ${T.borderLt}; color: ${T.info}; }
-        .ap-need-config { display: flex; flex-wrap: wrap; gap: 16px; padding-left: 26px; }
-        .ap-need-row { display: flex; align-items: center; gap: 8px; }
-        .ap-need-row label { font-size: 12px; color: ${T.textSec}; font-weight: 500; min-width: 60px; }
-        .ap-need-times { display: flex; align-items: center; gap: 6px; }
-        .ap-need-times select {
-          padding: 5px 8px;
-          border: 1px solid ${T.border};
-          border-radius: 6px;
-          font-size: 13px;
-          color: ${T.text};
-          background: ${T.card};
+
+        /* Shift pair (2 columns) */
+        .ap-shift-pair {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+          margin-top: 10px;
+          padding-left: 26px;
         }
-        .ap-need-times span { color: ${T.muted}; font-size: 12px; }
+        .ap-shift-card {
+          border: 1px solid ${T.border};
+          border-radius: 8px;
+          overflow: hidden;
+          transition: opacity 0.15s;
+        }
+        .ap-shift-card.disabled { opacity: 0.35; }
+        .ap-shift-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px 10px;
+          font-size: 12px;
+          font-weight: 600;
+        }
+        .ap-shift-header.morning {
+          background: ${T.warningBg};
+          color: ${T.warningDk};
+          border-bottom: 1px solid ${T.warningLt};
+        }
+        .ap-shift-header.afternoon {
+          background: ${T.infoBg};
+          color: ${T.infoDk};
+          border-bottom: 1px solid ${T.infoLt};
+        }
+        .ap-shift-toggle {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          cursor: pointer;
+          font-weight: 600;
+          font-size: 12px;
+        }
+        .ap-shift-toggle input { width: 14px; height: 14px; cursor: pointer; }
+        .ap-shift-times { font-size: 10px; opacity: 0.7; font-weight: 500; }
+        .ap-shift-body { padding: 10px; }
+        .ap-shift-counters { display: flex; flex-direction: column; gap: 6px; }
+        .ap-shift-counter-row { display: flex; align-items: center; gap: 8px; }
+        .ap-shift-counter-label { font-size: 11px; color: ${T.textSec}; font-weight: 500; min-width: 30px; }
+
+        /* Counters */
         .ap-need-counter { display: flex; align-items: center; gap: 0; }
         .ap-need-counter button {
-          width: 30px;
-          height: 30px;
+          width: 28px;
+          height: 28px;
           border: 1px solid ${T.border};
           background: ${T.card};
-          font-size: 16px;
+          font-size: 14px;
           cursor: pointer;
           color: ${T.text};
           transition: background 0.1s;
@@ -1226,20 +1549,22 @@ export default function AssistantPlanningPage() {
         .ap-need-counter button:last-child { border-radius: 0 6px 6px 0; }
         .ap-need-counter button:hover { background: ${T.borderLt}; }
         .ap-need-count {
-          width: 40px;
-          height: 30px;
+          width: 36px;
+          height: 28px;
           display: flex;
           align-items: center;
           justify-content: center;
           border-top: 1px solid ${T.border};
           border-bottom: 1px solid ${T.border};
-          font-size: 15px;
+          font-size: 14px;
           font-weight: 700;
           color: ${T.info};
           background: ${T.card};
         }
-        .ap-need-count.max { color: ${T.primaryDk}; }
+        .ap-need-count.morning { color: ${T.warningDk}; }
+        .ap-need-count.afternoon { color: ${T.infoDk}; }
 
+        /* Summary */
         .ap-needs-summary {
           display: flex;
           gap: 0;
@@ -1256,8 +1581,12 @@ export default function AssistantPlanningPage() {
           gap: 2px;
         }
         .ap-needs-stat:not(:last-child) { border-right: 1px solid rgba(255,255,255,0.15); }
-        .ap-needs-stat-val { font-size: 24px; font-weight: 800; }
-        .ap-needs-stat-label { font-size: 11px; opacity: 0.7; }
+        .ap-needs-stat-val { font-size: 22px; font-weight: 800; }
+        .ap-needs-stat-label { font-size: 10px; opacity: 0.7; }
+
+        @media (max-width: 500px) {
+          .ap-shift-pair { grid-template-columns: 1fr; }
+        }
 
         /* ═══ STEP 3: STUDENTS ═══ */
         .ap-students-info {
@@ -1510,6 +1839,7 @@ export default function AssistantPlanningPage() {
         .ap-kpi-icon { font-size: 20px; }
         .ap-kpi-val { font-size: 28px; font-weight: 800; color: ${T.text}; line-height: 1; }
         .ap-kpi-label { font-size: 11px; color: ${T.textSec}; }
+        .ap-kpi-sub { font-size: 9px; color: ${T.muted}; margin-top: 2px; }
 
         /* Warnings */
         .ap-warnings {
@@ -1543,7 +1873,19 @@ export default function AssistantPlanningPage() {
           color: ${T.textSec};
           border-bottom: 1px solid ${T.border};
         }
-        .ap-day-slots { padding: 6px; display: flex; flex-direction: column; gap: 5px; min-height: 60px; }
+        .ap-day-slots { padding: 6px; display: flex; flex-direction: column; gap: 4px; min-height: 60px; }
+        .ap-day-shift-label {
+          font-size: 9px;
+          font-weight: 700;
+          text-transform: uppercase;
+          padding: 2px 6px;
+          border-radius: 3px;
+          margin-top: 2px;
+          letter-spacing: 0.3px;
+        }
+        .ap-day-shift-label:first-child { margin-top: 0; }
+        .ap-day-shift-label.morning { background: ${T.warningBg}; color: ${T.warningDk}; }
+        .ap-day-shift-label.afternoon { background: ${T.infoBg}; color: ${T.infoDk}; }
         .ap-day-slot {
           display: flex;
           align-items: center;
