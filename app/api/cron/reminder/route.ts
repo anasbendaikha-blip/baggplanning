@@ -2,19 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
 
-// Client Supabase avec la clé service (accès admin)
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // Clé service pour accès admin
-);
-
-const resend = new Resend(process.env.RESEND_API_KEY);
-
 const FROM_EMAIL = 'BaggPlanning <onboarding@resend.dev>';
 
 // Cette route est appelée par le cron Vercel chaque dimanche à 14h
 export async function GET(request: NextRequest) {
   try {
+    // Init lazy pour éviter le crash au build si les env vars manquent
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+    const resend = new Resend(process.env.RESEND_API_KEY!);
     // Vérifier le secret pour sécuriser l'endpoint
     const authHeader = request.headers.get('authorization');
     if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {

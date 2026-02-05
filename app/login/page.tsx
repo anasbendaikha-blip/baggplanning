@@ -148,9 +148,8 @@ export default function LoginPage() {
                 borderRadius: '10px',
                 border: '2px solid #e2e8f0',
                 fontSize: '14px',
-                // Color and fontWeight depend on selectedEmployee
-                color: selectedEmployee ? '#0f172a' : '#94a3b8',
-                fontWeight: selectedEmployee ? 600 : 500,
+                color: '#0f172a',
+                fontWeight: selectedEmployee ? 600 : 400,
                 backgroundColor: 'white',
                 cursor: 'pointer',
                 appearance: 'none',
@@ -160,7 +159,7 @@ export default function LoginPage() {
                 backgroundSize: '20px',
               }}
             >
-              <option value="" disabled>
+              <option value="" disabled style={{ color: '#64748b' }}>
                 — Sélectionner —
               </option>
               <optgroup label="💊 Pharmaciens">

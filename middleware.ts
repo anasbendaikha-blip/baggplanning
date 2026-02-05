@@ -39,7 +39,7 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // racine => dashboard selon role
+  // racine => tableau de bord selon role
   if (pathname === '/') {
     const url = req.nextUrl.clone()
     url.pathname = role === 'titulaire' ? '/titulaire' : '/employe'

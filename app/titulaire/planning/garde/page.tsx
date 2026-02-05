@@ -246,24 +246,6 @@ export default function GardesPage() {
             >
               ← Retour planning
             </Link>
-            <Link
-              href="/titulaire/recap"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '10px 16px',
-                background: '#f1f5f9',
-                border: '1px solid #e2e8f0',
-                borderRadius: '8px',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: TXT.primary,
-                textDecoration: 'none',
-              }}
-            >
-              📊 Récap semaine
-            </Link>
           </div>
         </div>
 

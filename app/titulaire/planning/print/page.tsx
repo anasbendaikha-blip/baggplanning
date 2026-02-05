@@ -1,9 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { MOCK_EMPLOYEES, getRoleLabel, EmployeeRole } from '@/lib/mock-data'
 import { getWeekStart, addWeeks, formatWeekRange, getWeekDates, getWeekDayNames } from '@/lib/date-utils'
 import { getAllLeaves, isOnLeave } from '@/lib/demo-store'
+import { ROLE_PALETTE } from '@/lib/ui-tokens'
 
 // ============================================================
 // 📁 app/titulaire/planning/print/page.tsx
@@ -14,8 +16,13 @@ import { getAllLeaves, isOnLeave } from '@/lib/demo-store'
 // ============================================================
 
 const ROLE_ORDER: EmployeeRole[] = ['Pharmacien', 'Preparateur', 'Apprenti', 'Etudiant', 'Conditionneur']
+// Utiliser les couleurs centralisées de ROLE_PALETTE
 const ROLE_COLORS: Record<EmployeeRole, string> = {
-  Pharmacien: '#059669', Preparateur: '#2563eb', Apprenti: '#d97706', Etudiant: '#7c3aed', Conditionneur: '#475569'
+  Pharmacien: ROLE_PALETTE.Pharmacien.bg,
+  Preparateur: ROLE_PALETTE.Preparateur.bg,
+  Apprenti: ROLE_PALETTE.Apprenti.bg,
+  Etudiant: ROLE_PALETTE.Etudiant.bg,
+  Conditionneur: ROLE_PALETTE.Conditionneur.bg,
 }
 const JOURS_MAP = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'] as const
 const JOURS_COURTS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam']
@@ -53,7 +60,23 @@ const parseHoraire = (h: string | undefined): { s: string; e: string } | null =>
 }
 
 export default function PrintPlanningPage() {
-  const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date(2026, 0, 26)))
+  return (
+    <Suspense fallback={<div style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>Chargement...</div>}>
+      <PrintPlanningContent />
+    </Suspense>
+  )
+}
+
+function PrintPlanningContent() {
+  const searchParams = useSearchParams()
+  const [weekStart, setWeekStart] = useState(() => {
+    const weekParam = searchParams.get('week')
+    if (weekParam) {
+      const [y, m, d] = weekParam.split('-').map(Number)
+      return getWeekStart(new Date(y, m - 1, d))
+    }
+    return getWeekStart(new Date(2026, 0, 26))
+  })
   const [leaves, setLeaves] = useState<any[]>([])
   const [showPreview, setShowPreview] = useState(false)
 

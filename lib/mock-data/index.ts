@@ -603,11 +603,11 @@ export function getEmployeesWorkingOnDay(day: keyof MockEmployee['horaires']): M
 // ============================================================
 
 export const ROLE_COLORS: Record<EmployeeRole, string> = {
-  Pharmacien: '#10b981',
-  Preparateur: '#3b82f6',
-  Apprenti: '#8b5cf6',
-  Etudiant: '#f59e0b',
-  Conditionneur: '#6366f1',
+  Pharmacien: '#6366f1',     // indigo — via ui-tokens
+  Preparateur: '#3b82f6',    // blue
+  Apprenti: '#14b8a6',       // teal
+  Etudiant: '#ec4899',       // pink (≠ pause gris)
+  Conditionneur: '#f97316',  // orange
 }
 
 export const ROLE_ICONS: Record<EmployeeRole, string> = {

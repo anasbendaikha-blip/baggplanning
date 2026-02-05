@@ -76,7 +76,13 @@ export async function getAvailabilitiesForWeek(
     throw new Error(error.message)
   }
 
-  return (data ?? []) as AvailabilityWithEmployee[]
+  // Supabase returns employee as an array from the join — extract first element
+  return (data ?? []).map((row: Record<string, unknown>) => ({
+    ...row,
+    employee: Array.isArray(row.employee)
+      ? (row.employee[0] as StudentRow | undefined) ?? null
+      : row.employee ?? null,
+  })) as AvailabilityWithEmployee[]
 }
 
 export async function getStudentAvailabilities(
@@ -218,7 +224,13 @@ export async function getAvailableStudentsForDay(
     throw new Error(error.message)
   }
 
-  return (data ?? []) as AvailabilityWithEmployee[]
+  // Supabase returns employee as an array from the join — extract first element
+  return (data ?? []).map((row: Record<string, unknown>) => ({
+    ...row,
+    employee: Array.isArray(row.employee)
+      ? (row.employee[0] as StudentRow | undefined) ?? null
+      : row.employee ?? null,
+  })) as AvailabilityWithEmployee[]
 }
 
 // ============================================================
