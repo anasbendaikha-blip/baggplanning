@@ -492,6 +492,7 @@ export default function AssistantPlanningPage() {
 
     // ── 2. Add generated student slots ──
     const ts = Date.now()
+    // ── 2. Ajouter uniquement les créneaux de travail (pas de pauses auto) ──
     generatedPlan.assignments.forEach((a, idx) => {
       slotsPerDay[a.day].push({
         id: `ast-${a.shift}-${ts}-${idx}`,
@@ -499,50 +500,6 @@ export default function AssistantPlanningPage() {
         start_time: a.startTime,
         end_time: a.endTime,
         type: 'work',
-      })
-
-      // Auto-pause if single slot > 6h (e.g. afternoon 14:00-20:30 = 6h30)
-      const [sH, sM] = a.startTime.split(':').map(Number)
-      const [eH, eM] = a.endTime.split(':').map(Number)
-      const durationH = ((eH * 60 + eM) - (sH * 60 + sM)) / 60
-      if (durationH > 6) {
-        const startMins = sH * 60 + sM
-        const endMins = eH * 60 + eM
-        const pauseStart = startMins + Math.floor((endMins - startMins) / 2) - 15
-        const ph = Math.floor(pauseStart / 60)
-        const pm = pauseStart % 60
-        const peH = Math.floor((pauseStart + 30) / 60)
-        const peM = (pauseStart + 30) % 60
-        slotsPerDay[a.day].push({
-          id: `ast-p-${ts}-${idx}`,
-          employee_id: a.studentId,
-          start_time: `${ph.toString().padStart(2, '0')}:${pm.toString().padStart(2, '0')}`,
-          end_time: `${peH.toString().padStart(2, '0')}:${peM.toString().padStart(2, '0')}`,
-          type: 'pause',
-        })
-      }
-    })
-
-    // ── 2b. Pause déjeuner pour les étudiants qui font matin + après-midi ──
-    // Si un étudiant a un shift matin ET un shift après-midi le même jour,
-    // ajouter une pause de 30 min à la jonction (13:00-13:30)
-    const pauseAdded = new Set<string>()
-    JOURS_SEMAINE.forEach(j => {
-      const dayA = generatedPlan.assignments.filter(a => a.day === j)
-      const morningStudents = dayA.filter(a => a.shift === 'morning').map(a => a.studentId)
-      const afternoonStudents = dayA.filter(a => a.shift === 'afternoon').map(a => a.studentId)
-      const fullDayStudents = morningStudents.filter(id => afternoonStudents.includes(id))
-      fullDayStudents.forEach(studentId => {
-        const key = `${studentId}-${j}`
-        if (pauseAdded.has(key)) return
-        pauseAdded.add(key)
-        slotsPerDay[j].push({
-          id: `ast-lunch-${ts}-${studentId.slice(-4)}-${j}`,
-          employee_id: studentId,
-          start_time: '13:00',
-          end_time: '13:30',
-          type: 'pause',
-        })
       })
     })
 
